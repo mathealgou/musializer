@@ -1,5 +1,7 @@
 name: no-build build
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
 
 jobs:
   macos:
@@ -16,6 +18,18 @@ jobs:
         with:
           name: macos-build-folder
           path: build/
+      - name: Package release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          brew install imagemagick
+          ./nob dist
+          ditto -c -k --sequesterRsrc --keepParent build/Musializer.app musializer-macos.zip
+      - name: Upload release package
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: musializer-macos.zip
   ubuntu:
     strategy:
       matrix:
@@ -35,6 +49,15 @@ jobs:
         with:
           name: ubuntu-${{ matrix.cc }}-build-folder
           path: build/
+      - name: Package release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.cc == 'gcc'
+        run: ./nob dist
+      - name: Upload release package
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.cc == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: musializer-linux-x86_64.tar.gz
   windows:
     name: windows (${{ matrix.hotreload == true && 'hotreload' || '' }})
     runs-on: windows-latest
@@ -64,3 +87,40 @@ jobs:
         with:
           name: windows-${{ matrix.hotreload == true && 'hotreload' || '' }}-build-folder
           path: build/
+      # `nob dist` is not implemented for the MSVC target, so package by hand
+      - name: Package release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.hotreload == false
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory musializer-win64
+          Copy-Item build/musializer.exe musializer-win64/
+          Copy-Item -Recurse resources musializer-win64/resources
+          Copy-Item musializer-logged.bat musializer-win64/
+          Compress-Archive -Path musializer-win64 -DestinationPath musializer-win64.zip
+      - name: Upload release package
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.hotreload == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: musializer-win64.zip
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [macos, ubuntu, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          # Creates the tag on the pushed commit if it doesn't exist yet
+          tag_name: v0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          files: dist/*
+          generate_release_notes: true
