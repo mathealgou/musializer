@@ -19,13 +19,13 @@ jobs:
           name: macos-build-folder
           path: build/
       - name: Package release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         run: |
           brew install imagemagick
           ./nob dist
           ditto -c -k --sequesterRsrc --keepParent build/Musializer.app musializer-macos.zip
       - name: Upload release package
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: release-macos
@@ -50,10 +50,10 @@ jobs:
           name: ubuntu-${{ matrix.cc }}-build-folder
           path: build/
       - name: Package release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.cc == 'gcc'
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.cc == 'gcc'
         run: ./nob dist
       - name: Upload release package
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.cc == 'gcc'
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.cc == 'gcc'
         uses: actions/upload-artifact@v4
         with:
           name: release-linux
@@ -89,7 +89,7 @@ jobs:
           path: build/
       # `nob dist` is not implemented for the MSVC target, so package by hand
       - name: Package release
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.hotreload == false
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.hotreload == false
         shell: pwsh
         run: |
           New-Item -ItemType Directory musializer-win64
@@ -98,13 +98,13 @@ jobs:
           Copy-Item musializer-logged.bat musializer-win64/
           Compress-Archive -Path musializer-win64 -DestinationPath musializer-win64.zip
       - name: Upload release package
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push' && matrix.hotreload == false
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.hotreload == false
         uses: actions/upload-artifact@v4
         with:
           name: release-windows
           path: musializer-win64.zip
   release:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     needs: [macos, ubuntu, windows]
     runs-on: ubuntu-latest
     permissions:
