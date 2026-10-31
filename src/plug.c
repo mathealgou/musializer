@@ -192,6 +192,7 @@ typedef struct {
     int circle_radius_location;
     int circle_power_location;
     bool fullscreen;
+    bool castrated;
 
     // Renderer
     bool rendering;
@@ -362,6 +363,10 @@ static void fft_render(Rectangle boundary, size_t m)
     }
 
     Texture2D texture = { rlGetTextureIdDefault(), 1, 1, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+
+    // No balls if castrated
+    if (p->castrated) {return;}
+
 
     // Display the Smears
     SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.3f }, SHADER_UNIFORM_FLOAT);
@@ -1227,6 +1232,37 @@ static int render_button_with_location(const char *file, int line, Rectangle bou
     return state;
 }
 
+static int castrated_checkbox_with_location(const char *file, int line, Rectangle boundary)
+{
+    uint64_t id = DJB2_INIT;
+    id = djb2(id, file, strlen(file));
+    id = djb2(id, &line, sizeof(line));
+
+    int state = button_with_id(id, boundary);
+    if (state & BS_CLICKED) {
+        p->castrated = !p->castrated;
+    }
+
+    Rectangle checkbox = {
+        .x = boundary.x + boundary.width/2 - boundary.width*0.2f,
+        .y = boundary.y + boundary.height/2 - boundary.height*0.2f,
+        .width = boundary.width*0.4f,
+        .height = boundary.height*0.4f,
+    };
+    Color color = (state & BS_HOVEROVER) ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
+    DrawRectangleRounded(boundary, 0.2f, 20, color);
+    if (p->castrated) {
+        DrawRectangleRec(checkbox, COLOR_ACCENT);
+    }
+    DrawRectangleLinesEx(checkbox, 2, WHITE);
+
+    tooltip(boundary, "Castrated mode (no balls)", SIDE_TOP, false);
+    return state;
+}
+
+#define castrated_checkbox(boundary) \
+    castrated_checkbox_with_location(__FILE__, __LINE__, (boundary))
+
 #ifdef MUSIALIZER_MICROPHONE
 #define microphone_button(boundary) \
     microphone_button_with_location(__FILE__, __LINE__, (boundary))
@@ -1355,9 +1391,9 @@ static bool toolbar(Track *track, Rectangle boundary)
     int state = 0;
 
 #ifdef MUSIALIZER_MICROPHONE
-    size_t buttons_count = 5;
+    size_t buttons_count = 6;
 #else
-    size_t buttons_count = 4;
+    size_t buttons_count = 5;
 #endif // MUSIALIZER_MICROPHONE
 
     if (boundary.width < HUD_BUTTON_SIZE*buttons_count) return interacted;
@@ -1388,6 +1424,17 @@ static bool toolbar(Track *track, Rectangle boundary)
     if (state & BS_CLICKED) {
         interacted = true;
         start_rendering_track(track);
+    }
+
+    state = castrated_checkbox((CLITERAL(Rectangle) {
+        x,
+        boundary.y,
+        HUD_BUTTON_SIZE,
+        HUD_BUTTON_SIZE,
+    }));
+    x += HUD_BUTTON_SIZE;
+    if (state & BS_CLICKED) {
+        interacted = true;
     }
 
 #ifdef MUSIALIZER_MICROPHONE
@@ -1871,6 +1918,7 @@ MUSIALIZER_PLUG void plug_init(void)
     load_assets();
     p->screen = LoadRenderTexture(RENDER_WIDTH, RENDER_HEIGHT);
     p->current_track = -1;
+    p->castrated = false;
 
     // TODO: restore master volume between sessions
     SetMasterVolume(0.5);
