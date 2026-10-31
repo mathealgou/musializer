@@ -5,7 +5,7 @@
 </p>
 
 > [!WARNING]
-> This software is unfinished. Keep your expectations low.
+> This is a fork of [https://github.com/tsoding/musializer](https://github.com/tsoding/musializer)
 
 The project aims to make a tool for creating beautiful music visualizations and rendering high quality videos of them.
 
