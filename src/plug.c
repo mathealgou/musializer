@@ -654,14 +654,14 @@ static void end_tooltip_frame(void)
     DrawTextEx(p->font, p->tooltip_buffer, position, fontSize, spacing, COLOR_TOOLTIP_FOREGROUND);
 }
 
-static void tooltip(Rectangle boundary, const char *text, Side align, bool persists)
+static void tooltip(Plug *plug, Rectangle boundary, const char *text, Side align, bool persists)
 {
     if (!(CheckCollisionPointRec(GetMousePosition(), boundary) || persists)) return;
-    p->tooltip_show = true;
+    plug->tooltip_show = true;
     // TODO: this may not work properly if text contains UTF-8
-    snprintf(p->tooltip_buffer, sizeof(p->tooltip_buffer), "%s", text);
-    p->tooltip_align = align;
-    p->tooltip_element_boundary = boundary;
+    snprintf(plug->tooltip_buffer, sizeof(plug->tooltip_buffer), "%s", text);
+    plug->tooltip_align = align;
+    plug->tooltip_element_boundary = boundary;
 }
 
 static void timeline(Rectangle timeline_boundary, Track *track)
@@ -700,19 +700,19 @@ typedef enum {
     BS_CLICKED   = 2, // 10
 } Button_State;
 
-static int button_with_id(uint64_t id, Rectangle boundary)
+static int button_with_id(Plug *plug, uint64_t id, Rectangle boundary)
 {
     Vector2 mouse = GetMousePosition();
     int hoverover = CheckCollisionPointRec(mouse, boundary);
 
     int clicked = 0;
-    if (p->active_button_id == 0) {
+    if (plug->active_button_id == 0) {
         if (hoverover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-            p->active_button_id = id;
+            plug->active_button_id = id;
         }
-    } else if (p->active_button_id == id) {
+    } else if (plug->active_button_id == id) {
         if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            p->active_button_id = 0;
+            plug->active_button_id = 0;
             if (hoverover) clicked = 1;
         }
     }
@@ -731,15 +731,15 @@ static uint64_t djb2(uint64_t hash, const void *buf, size_t buf_sz)
     return hash;
 }
 
-static int button_with_location(const char *file, int line, Rectangle boundary)
+static int button_with_location(Plug *plug, const char *file, int line, Rectangle boundary)
 {
     uint64_t id = DJB2_INIT;
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
-    return button_with_id(id, boundary);
+    return button_with_id(plug, id, boundary);
 }
 
-#define button(boundary) button_with_location(__FILE__, __LINE__, boundary)
+#define button(plug, boundary) button_with_location((plug), __FILE__, __LINE__, (boundary))
 
 // NOTE: This is literally DrawTextEx() copy-pasted from Raylib itself but with the
 // max_width support and without newlines
@@ -826,7 +826,7 @@ static void tracks_panel_with_location(const char *file, int line, Rectangle pan
         if (((int) i != p->current_track)) {
             uint64_t item_id = djb2(id, &i, sizeof(i));
 
-            int state = button_with_id(item_id, GetCollisionRec(panel_boundary, item_boundary));
+            int state = button_with_id(p, item_id, GetCollisionRec(panel_boundary, item_boundary));
             if (state & BS_HOVEROVER) {
                 color = COLOR_TRACK_BUTTON_HOVEROVER;
             } else {
@@ -857,7 +857,7 @@ static void tracks_panel_with_location(const char *file, int line, Rectangle pan
         // Label overflow scroll handler
         float max_width = item_boundary.width - text_padding*2;
         uint64_t item_id = djb2(id, &i, sizeof(i));
-        int state = button_with_id(item_id, GetCollisionRec(panel_boundary, item_boundary));
+        int state = button_with_id(p, item_id, GetCollisionRec(panel_boundary, item_boundary));
 
         if ((size.x > max_width)) { // <-- Item needs ScissorMode
             BeginScissorMode(position.x, position.y, max_width, item_boundary.height);
@@ -945,7 +945,7 @@ static int fullscreen_button_with_loc(const char *file, int line, Rectangle full
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
 
-    int state = button_with_id(id, fullscreen_button_boundary);
+    int state = button_with_id(p, id, fullscreen_button_boundary);
 
     float icon_size = 512;
     float scale = HUD_BUTTON_SIZE/icon_size*HUD_ICON_SCALE;
@@ -973,172 +973,15 @@ static int fullscreen_button_with_loc(const char *file, int line, Rectangle full
     DrawTexturePro(p->icon_textures[UI_ICON_FULLSCREEN], source, dest, CLITERAL(Vector2){0}, 0, ColorBrightness(WHITE, -0.10));
 
     if (p->fullscreen) {
-        tooltip(fullscreen_button_boundary, "Collapse [F]", SIDE_TOP, false);
+        tooltip(p, fullscreen_button_boundary, "Collapse [F]", SIDE_TOP, false);
     } else {
-        tooltip(fullscreen_button_boundary, "Expand [F]", SIDE_TOP, false);
+        tooltip(p, fullscreen_button_boundary, "Expand [F]", SIDE_TOP, false);
     }
 
     return state;
 }
 
-static float slider_get_value(float x, float lox, float hix)
-{
-    if (x < lox) x = lox;
-    if (x > hix) x = hix;
-    x -= lox;
-    x /= hix - lox;
-    return x;
-}
-
-static bool horz_slider(Rectangle boundary, float *value, bool *dragging)
-{
-    bool updated = false;
-
-    Vector2 mouse = GetMousePosition();
-
-    Vector2 startPos = {
-        .x = boundary.x + boundary.height/2,
-        .y = boundary.y + boundary.height/2,
-    };
-    Vector2 endPos = {
-        .x = boundary.x + boundary.width - boundary.height/2,
-        .y = boundary.y + boundary.height/2,
-    };
-    Color color = WHITE;
-    DrawLineEx(startPos, endPos, boundary.height*0.10, color);
-    Vector2 center = {
-        .x = startPos.x + (endPos.x - startPos.x)*(*value),
-        .y = startPos.y,
-    };
-    float radius = boundary.height/4;
-    {
-        Texture2D texture = { rlGetTextureIdDefault(), 1, 1, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
-        SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.43f }, SHADER_UNIFORM_FLOAT);
-        SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 2.0f }, SHADER_UNIFORM_FLOAT);
-        BeginShaderMode(p->circle);
-        Rectangle source = {0, 0, 1, 1};
-        Rectangle dest = { center.x - radius, center.y - radius, radius*2, radius*2 };
-        Vector2 origin = {0};
-        DrawTexturePro(texture, source, dest, origin, 0, color);
-        EndShaderMode();
-    }
-
-    if (!*dragging) {
-        if (CheckCollisionPointCircle(mouse, center, radius)) {
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                *dragging = true;
-            }
-        } else {
-            if (CheckCollisionPointRec(mouse, boundary)) {
-                if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                    *value = slider_get_value(mouse.x, startPos.x, endPos.x);
-                    updated = true;
-                    *dragging = true;
-                }
-            }
-        }
-    } else {
-        *value = slider_get_value(mouse.x, startPos.x, endPos.x);
-        updated = true;
-
-        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT)) {
-            *dragging = false;
-        }
-    }
-    return updated;
-}
-
-#define volume_slider(preview_boundary) \
-    volume_slider_with_location(__FILE__, __LINE__, (preview_boundary))
-static bool volume_slider_with_location(const char *file, int line, Rectangle volume_icon_boundary)
-{
-    Vector2 mouse = GetMousePosition();
-
-    static int expanded = false;
-    static bool dragging = false;
-    static float saved_volume = 0.0f;
-
-    Rectangle volume_slider_boundary = volume_icon_boundary;
-
-    size_t expanded_slots = 6;
-    if (expanded) volume_slider_boundary.width = expanded_slots*HUD_BUTTON_SIZE;
-
-    expanded = dragging || CheckCollisionPointRec(mouse, volume_slider_boundary);
-
-    float icon_size = 512;
-    float scale = HUD_BUTTON_SIZE/icon_size*HUD_ICON_SCALE;
-    Rectangle dest = {
-        volume_slider_boundary.x + HUD_BUTTON_SIZE/2 - icon_size*scale/2,
-        volume_slider_boundary.y + HUD_BUTTON_SIZE/2 - icon_size*scale/2,
-        icon_size*scale,
-        icon_size*scale
-    };
-
-    // TODO: animate volume slider expansion
-    float volume = GetMasterVolume();
-
-    size_t icon_index;
-    if (volume <= 0) {
-        icon_index = 0;
-    } else {
-        size_t phases = 2;
-        icon_index = volume*phases;
-        if (icon_index >= phases) icon_index = phases - 1;
-        icon_index += 1;
-    }
-
-    Rectangle source = {icon_size*icon_index, 0, icon_size, icon_size};
-
-    DrawTexturePro(p->icon_textures[UI_ICON_VOLUME], source, dest, CLITERAL(Vector2){0}, 0, ColorBrightness(WHITE, -0.10));
-
-    bool updated = false;
-
-    if (expanded) {
-        Rectangle slider_boundary = {
-            .x = volume_slider_boundary.x + HUD_BUTTON_SIZE,
-            .y = volume_slider_boundary.y,
-            .width = (expanded_slots - 1)*HUD_BUTTON_SIZE,
-            .height = HUD_BUTTON_SIZE,
-        };
-        updated = horz_slider(slider_boundary, &volume, &dragging);
-        float mouse_wheel_step = 0.05;
-        float wheel_delta = GetMouseWheelMove();
-        volume += wheel_delta*mouse_wheel_step;
-        if (volume < 0) volume = 0;
-        if (volume > 1) volume = 1;
-        SetMasterVolume(volume);
-
-        tooltip(slider_boundary, TextFormat("Volume %d%%", (int)floorf(volume*100.0f)), SIDE_TOP, dragging);
-    }
-
-    // Toggle mute
-
-    uint64_t id = DJB2_INIT;
-    id = djb2(id, file, strlen(file));
-    id = djb2(id, &line, sizeof(line));
-    int volume_icon_state = button_with_id(id, volume_icon_boundary);
-    if (
-        IsKeyPressed(KEY_TOGGLE_MUTE) ||
-        (volume_icon_state & BS_CLICKED)
-    ) {
-        if (volume > 0) {
-            saved_volume = volume;
-            volume = 0;
-        } else {
-            volume = saved_volume;
-        }
-        SetMasterVolume(volume);
-        updated = true;
-    }
-
-    if (volume <= 0.0) {
-        tooltip(volume_icon_boundary, "Unmute [M]", SIDE_TOP, false);
-    } else {
-        tooltip(volume_icon_boundary, "Mute [M]", SIDE_TOP, false);
-    }
-
-    return dragging || updated;
-}
+#include "ui.c"
 
 static void popup_tray(Popup_Tray *pt, Rectangle preview_boundary)
 {
@@ -1192,7 +1035,7 @@ static int cancel_rendering_button_with_location(const char *file, int line, Rec
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
 
-    int state = button_with_id(id, boundary);
+    int state = button_with_id(p, id, boundary);
 
     Color color = (state & BS_HOVEROVER) ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
     DrawRectangleRounded(boundary, 0.4, 20, color);
@@ -1236,7 +1079,7 @@ static int play_button_with_location(const char *file, int line, Track *track, R
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
 
-    int state = button_with_id(id, boundary);
+    int state = button_with_id(p, id, boundary);
     size_t icon_index = IsMusicStreamPlaying(track->music) ? 1 : 0;
 
     float icon_size = 512;
@@ -1252,9 +1095,9 @@ static int play_button_with_location(const char *file, int line, Track *track, R
     DrawTexturePro(p->icon_textures[UI_ICON_PLAY], source, dest, CLITERAL(Vector2){0}, 0, ColorBrightness(WHITE, -0.10));
 
     if (IsMusicStreamPlaying(track->music)) {
-        tooltip(boundary, "Pause [SPACE]", SIDE_TOP, false);
+        tooltip(p, boundary, "Pause [SPACE]", SIDE_TOP, false);
     } else {
-        tooltip(boundary, "Play [SPACE]", SIDE_TOP, false);
+        tooltip(p, boundary, "Play [SPACE]", SIDE_TOP, false);
     }
 
     return state;
@@ -1268,7 +1111,7 @@ static int render_button_with_location(const char *file, int line, Rectangle bou
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
 
-    int state = button_with_id(id, boundary);
+    int state = button_with_id(p, id, boundary);
     size_t icon_index = 0;
 
     float icon_size = 512;
@@ -1283,73 +1126,10 @@ static int render_button_with_location(const char *file, int line, Rectangle bou
     Rectangle source = {icon_size*icon_index, 0, icon_size, icon_size};
     DrawTexturePro(p->icon_textures[UI_ICON_RENDER], source, dest, CLITERAL(Vector2){0}, 0, ColorBrightness(WHITE, -0.10));
 
-    tooltip(boundary, "Render [R]", SIDE_TOP, false);
+    tooltip(p, boundary, "Render [R]", SIDE_TOP, false);
 
     return state;
 }
-
-static int castrated_checkbox_with_location(const char *file, int line, Rectangle boundary)
-{
-    uint64_t id = DJB2_INIT;
-    id = djb2(id, file, strlen(file));
-    id = djb2(id, &line, sizeof(line));
-
-    int state = button_with_id(id, boundary);
-    if (state & BS_CLICKED) {
-        p->castrated = !p->castrated;
-    }
-
-    Rectangle checkbox = {
-        .x = boundary.x + boundary.width/2 - boundary.width*0.2f,
-        .y = boundary.y + boundary.height/2 - boundary.height*0.2f,
-        .width = boundary.width*0.4f,
-        .height = boundary.height*0.4f,
-    };
-    Color color = (state & BS_HOVEROVER) ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
-    DrawRectangleRounded(boundary, 0.2f, 20, color);
-    if (p->castrated) {
-        DrawRectangleRec(checkbox, COLOR_ACCENT);
-    }
-    DrawRectangleLinesEx(checkbox, 2, WHITE);
-
-    tooltip(boundary, "Castrated mode (no balls)", SIDE_TOP, false);
-    return state;
-}
-
-#define castrated_checkbox(boundary) \
-    castrated_checkbox_with_location(__FILE__, __LINE__, (boundary))
-
-
-static int wide_bois_checkbox_with_location(const char *file, int line, Rectangle boundary)
-{
-    uint64_t id = DJB2_INIT;
-    id = djb2(id, file, strlen(file));
-    id = djb2(id, &line, sizeof(line));
-
-    int state = button_with_id(id, boundary);
-    if (state & BS_CLICKED) {
-        p->wide_bois = !p->wide_bois;
-    }
-
-    Rectangle checkbox = {
-        .x = boundary.x + boundary.width/2 - boundary.width*0.2f,
-        .y = boundary.y + boundary.height/2 - boundary.height*0.2f,
-        .width = boundary.width*0.4f,
-        .height = boundary.height*0.4f,
-    };
-    Color color = (state & BS_HOVEROVER) ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
-    DrawRectangleRounded(boundary, 0.2f, 20, color);
-    if (p->wide_bois) {
-        DrawRectangleRec(checkbox, COLOR_ACCENT);
-    }
-    DrawRectangleLinesEx(checkbox, 2, WHITE);
-
-    tooltip(boundary, "Wide Bois", SIDE_TOP, false);
-    return state;
-}
-
-#define wide_bois_checkbox(boundary) \
-    wide_bois_checkbox_with_location(__FILE__, __LINE__, (boundary))
 
 #ifdef MUSIALIZER_MICROPHONE
 #define microphone_button(boundary) \
@@ -1360,7 +1140,7 @@ static int microphone_button_with_location(const char *file, int line, Rectangle
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
 
-    int state = button_with_id(id, boundary);
+    int state = button_with_id(p, id, boundary);
     size_t icon_index = 0;
 
     float icon_size = 512;
@@ -1375,7 +1155,7 @@ static int microphone_button_with_location(const char *file, int line, Rectangle
     Rectangle source = {icon_size*icon_index, 0, icon_size, icon_size};
     DrawTexturePro(p->icon_textures[UI_ICON_MICROPHONE], source, dest, CLITERAL(Vector2){0}, 0, ColorBrightness(WHITE, -0.10));
 
-    tooltip(boundary, "Microphone [C]", SIDE_TOP, false);
+    tooltip(p, boundary, "Microphone [C]", SIDE_TOP, false);
 
     return state;
 }
@@ -1514,7 +1294,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         start_rendering_track(track);
     }
 
-    state = castrated_checkbox((CLITERAL(Rectangle) {
+    state = checkbox(p, &p->castrated, "Castrated mode (no balls)", (CLITERAL(Rectangle) {
         x,
         boundary.y,
         HUD_BUTTON_SIZE,
@@ -1525,7 +1305,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
 
-    state = wide_bois_checkbox((CLITERAL(Rectangle) {
+    state = checkbox(p, &p->wide_bois, "Wide Bois", (CLITERAL(Rectangle) {
         x,
         boundary.y,
         HUD_BUTTON_SIZE,
@@ -1552,7 +1332,7 @@ static bool toolbar(Track *track, Rectangle boundary)
 
     // TODO: implement "add new track" button that uses tinyfiledialogs
 
-    bool volume_slider_interacted = volume_slider((CLITERAL(Rectangle) {
+    bool volume_slider_interacted = volume_slider(p, (CLITERAL(Rectangle) {
         x,
         boundary.y,
         HUD_BUTTON_SIZE,
@@ -1662,7 +1442,7 @@ static void preview_screen(void)
 
 #if 0
             // TODO: toggle track playing on right mouse click on the preview
-            if (button(preview_boundary) & BS_CLICKED) {
+            if (button(p, preview_boundary) & BS_CLICKED) {
                 toggle_track_playing(track);
             }
 #else
@@ -1682,7 +1462,7 @@ static void preview_screen(void)
 
 #if 0
             // TODO: toggle track playing on right mouse click on the preview
-            if (button(preview_boundary) & BS_CLICKED) {
+            if (button(p, preview_boundary) & BS_CLICKED) {
                 toggle_track_playing(track);
             }
 #else
@@ -1741,7 +1521,7 @@ static void preview_screen(void)
             .height = h,
         });
 
-        if (button(((Rectangle) {0, 0, w, h})) & BS_CLICKED) {
+        if (button(p, ((Rectangle) {0, 0, w, h})) & BS_CLICKED) {
             int allow_multiple_selects = 0; // TODO: enable multiple selects
             char const *filter_params[] = {"*.wav", "*.ogg", "*.mp3", "*.qoa", "*.xm", "*.mod", "*.flac"};
             char *input_path = tinyfd_openFileDialog("Path to music file", "./", NOB_ARRAY_LEN(filter_params), filter_params, "music file", allow_multiple_selects);
@@ -1921,7 +1701,7 @@ static void rendering_screen(void)
                 };
                 boundary.x = w - boundary.width - HUD_BUTTON_SIZE*0.5;
                 boundary.y = HUD_BUTTON_SIZE*0.5;
-                tooltip(boundary, "Cancel [Esc]", SIDE_LEFT, false);
+                tooltip(p, boundary, "Cancel [Esc]", SIDE_LEFT, false);
                 if (cancel_rendering_button(boundary) & BS_CLICKED) {
                     p->cancel_rendering = true;
                 }
