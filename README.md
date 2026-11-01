@@ -4,6 +4,8 @@
   <img src="./resources/logo/logo-256.png">
 </p>
 
+[![no-build build](https://github.com/mathealgou/musializer/actions/workflows/nob.yaml/badge.svg)](https://github.com/mathealgou/musializer/actions/workflows/nob.yaml)
+
 > [!WARNING]
 > This is a fork of [https://github.com/tsoding/musializer](https://github.com/tsoding/musializer)
 
