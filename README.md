@@ -11,12 +11,6 @@ The project aims to make a tool for creating beautiful music visualizations and 
 
 *Please, read [CONTRIBUTING.md](CONTRIBUTING.md) before making a PR.*
 
-## Demo
-
-*Music by [@nu11](https://soundcloud.com/nu11-chiptune) from [https://soundcloud.com/nu11-chiptune/nu11-wip-works-2016-2022](https://soundcloud.com/nu11-chiptune/nu11-wip-works-2016-2022) at 20:38*
-
-https://github.com/tsoding/musializer/assets/165283/8b9f9653-9b3d-4c04-9569-338fa19af071
-
 ## Supported Audio Formats
 
 - wav
@@ -29,8 +23,7 @@ https://github.com/tsoding/musializer/assets/165283/8b9f9653-9b3d-4c04-9569-338f
 
 ## Download Binaries
 
-- Windows: [musializer-alpha2-win64.zip](https://github.com/tsoding/musializer/releases/download/alpha2/musializer-alpha2-win64.zip)
-- Linux: *in progress*
+-  [Released Binaries](https://github.com/mathealgou/musializer/releases/latest)
 
 ## Build from Source
 
@@ -82,15 +75,3 @@ $ ./nob
 $ wine ./build/musializer.exe
 ```
 
-## Hot Reloading
-
-Edit `./build/config.h` and enable `MUSIALIZER_HOTRELOAD`.
-
-```console
-$ ./nob
-$ ./build/musializer
-```
-
-Keep the app running. Rebuild with `./nob`. Hot reload by focusing on the window of the app and pressing <kbd>h</kbd>.
-
-The way it works is by putting the majority of the logic of the application into a `libplug` dynamic library and just reloading it when requested. The [rpath](https://en.wikipedia.org/wiki/Rpath) (aka hard-coded run-time search path) for that library is set to `.` and `./build/`. See [src_build/nob_linux.c](src_build/nob_linux.c) for more information on how everything is configured.
