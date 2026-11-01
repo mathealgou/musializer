@@ -230,12 +230,7 @@ typedef struct {
     Side tooltip_align;
     Rectangle tooltip_element_boundary;
 
-#ifdef MUSIALIZER_MICROPHONE
-    bool capturing;
-    ma_device microphone;
-    drwav wav;
-    bool microphone_working;
-#endif // MUSIALIZER_MICROPHONE
+
 } Plug;
 
 static Plug *p = NULL;
@@ -346,26 +341,48 @@ static size_t fft_analyze(float dt)
 
 static bool color_from_rgb_hex(const char *text, Color *color)
 {
-    if (strlen(text) != 6) return false;
-
-    unsigned int value = 0;
-    for (size_t i = 0; i < 6; ++i) {
-        char c = text[i];
-        unsigned int digit;
-        if (c >= '0' && c <= '9') {
-            digit = (unsigned int)(c - '0');
-        } else if (c >= 'A' && c <= 'F') {
-            digit = (unsigned int)(c - 'A' + 10);
-        } else if (c >= 'a' && c <= 'f') {
-            digit = (unsigned int)(c - 'a' + 10);
-        } else {
-            return false;
+    if (strlen(text) == 6) {
+        unsigned int value = 0;
+        for (size_t i = 0; i < 6; ++i) {
+            char c = text[i];
+            unsigned int digit;
+            if (c >= '0' && c <= '9') {
+                digit = (unsigned int)(c - '0');
+            } else if (c >= 'A' && c <= 'F') {
+                digit = (unsigned int)(c - 'A' + 10);
+            } else if (c >= 'a' && c <= 'f') {
+                digit = (unsigned int)(c - 'a' + 10);
+            } else {
+                return false;
+            }
+            value = (value << 4) | digit;
         }
-        value = (value << 4) | digit;
+    
+        *color = GetColor((value << 8) | 0xFF);
+        return true;
+    } else if (strlen(text) == 3) {
+        unsigned int value = 0;
+        for (size_t i = 0; i < 3; ++i) {
+            char c = text[i];
+            unsigned int digit;
+            if (c >= '0' && c <= '9') {
+                digit = (unsigned int)(c - '0');
+            } else if (c >= 'A' && c <= 'F') {
+                digit = (unsigned int)(c - 'A' + 10);
+            } else if (c >= 'a' && c <= 'f') {
+                digit = (unsigned int)(c - 'a' + 10);
+            } else {
+                return false;
+            }
+            value = (value << 8) | (digit << 4) | digit;
+        }
+
+        *color = GetColor((value << 8) | 0xFF);
+        return true;
+    } else {
+        return false;
     }
 
-    *color = GetColor((value << 8) | 0xFF);
-    return true;
 }
 
 static Color fft_bar_color(size_t index, size_t count)
@@ -528,24 +545,7 @@ static void callback(void *bufferData, unsigned int frames)
     for (size_t i = 0; i < frames; ++i) {
         fft_push(fs[i][0]);
     }
-
-#ifdef MUSIALIZER_MICROPHONE
-    if (p->capturing) {
-        // TODO: according to documentation drwav_write_pcm_frames may not write all the frames.
-        // Make sure it does.
-        drwav_write_pcm_frames(&p->wav, frames, bufferData);
-    }
-#endif // MUSIALIZER_MICROPHONE
 }
-
-#ifdef MUSIALIZER_MICROPHONE
-static void ma_callback(ma_device *pDevice, void *pOutput, const void *pInput,ma_uint32 frameCount)
-{
-    callback((void*)pInput,frameCount);
-    (void)pOutput;
-    (void)pDevice;
-}
-#endif // MUSIALIZER_MICROPHONE
 
 static Track *current_track(void)
 {
@@ -1159,36 +1159,6 @@ static int render_button_with_location(const char *file, int line, Rectangle bou
     return state;
 }
 
-#ifdef MUSIALIZER_MICROPHONE
-#define microphone_button(boundary) \
-    microphone_button_with_location(__FILE__, __LINE__, (boundary))
-static int microphone_button_with_location(const char *file, int line, Rectangle boundary)
-{
-    uint64_t id = DJB2_INIT;
-    id = djb2(id, file, strlen(file));
-    id = djb2(id, &line, sizeof(line));
-
-    int state = button_with_id(p, id, boundary);
-    size_t icon_index = 0;
-
-    float icon_size = 512;
-    float scale = HUD_BUTTON_SIZE/icon_size*HUD_ICON_SCALE;
-    Rectangle dest = {
-        boundary.x + boundary.width/2 - icon_size*scale/2,
-        boundary.y + boundary.height/2 - icon_size*scale/2,
-        icon_size*scale,
-        icon_size*scale
-    };
-
-    Rectangle source = {icon_size*icon_index, 0, icon_size, icon_size};
-    DrawTexturePro(p->icon_textures[UI_ICON_MICROPHONE], source, dest, CLITERAL(Vector2){0}, 0, ColorBrightness(WHITE, -0.10));
-
-    tooltip(p, boundary, "Microphone [C]", SIDE_TOP, false);
-
-    return state;
-}
-#endif // MUSIALIZER_MICROPHONE
-
 static void toggle_track_playing(Track *track)
 {
     if (IsMusicStreamPlaying(track->music)) {
@@ -1231,54 +1201,7 @@ static void finish_rendering_track(Track *track)
     PlayMusicStream(track->music);
 }
 
-#ifdef MUSIALIZER_MICROPHONE
-static void start_capture(void)
-{
-    ma_result result = MA_SUCCESS;
 
-    assert(!p->capturing);
-    assert(!p->microphone_working);
-
-    p->capturing = true;
-
-    const char *recording_file_path = "recording.wav";
-
-    drwav_data_format format = {0};
-    format.container = drwav_container_riff;
-    format.format = DR_WAVE_FORMAT_IEEE_FLOAT;
-    format.channels = 2;
-    format.sampleRate = 44100;
-    format.bitsPerSample = 32;
-    if (!drwav_init_file_write(&p->wav, recording_file_path, &format, NULL)) {
-        TraceLog(LOG_ERROR, "DRWAVE: Failed to initialize output file %s", recording_file_path);
-        return;
-    }
-
-    // TODO: let the user choose their mic
-    ma_device_config deviceConfig = ma_device_config_init(ma_device_type_capture);
-    deviceConfig.capture.format = ma_format_f32;
-    deviceConfig.capture.channels = 2;
-    deviceConfig.sampleRate = 44100;
-    deviceConfig.dataCallback = ma_callback;
-    deviceConfig.pUserData = NULL;
-    result = ma_device_init(NULL, &deviceConfig, &p->microphone);
-    if (result != MA_SUCCESS) {
-        TraceLog(LOG_ERROR, "MINIAUDIO: Failed to initialize capture device: %s", ma_result_description(result));
-        drwav_uninit(&p->wav);
-        return;
-    }
-
-    result = ma_device_start(&p->microphone);
-    if (result != MA_SUCCESS) {
-        TraceLog(LOG_ERROR, "MINIAUDIO: Failed to start device: %s", ma_result_description(result));
-        ma_device_uninit(&p->microphone);
-        drwav_uninit(&p->wav);
-        return;
-    }
-
-    p->microphone_working = true;
-}
-#endif // MUSIALIZER_MICROPHONE
 
 // TODO: adapt toolbar to narrow widths
 static bool toolbar(Track *track, Rectangle boundary)
@@ -1286,12 +1209,8 @@ static bool toolbar(Track *track, Rectangle boundary)
     bool interacted = false;
     int state = 0;
 
-#ifdef MUSIALIZER_MICROPHONE
-    size_t buttons_count = 6;
-#else
-    size_t buttons_count = 5;
-#endif // MUSIALIZER_MICROPHONE
 
+    size_t buttons_count = 5;
     if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 5)) return interacted;
 
     DrawRectangleRec(boundary, COLOR_TRACK_PANEL_BACKGROUND);
@@ -1355,23 +1274,8 @@ static bool toolbar(Track *track, Rectangle boundary)
         p->custom_bars_color = color_from_rgb_hex(p->bars_color, &p->bars_color_value);
         interacted = true;
     }
-    tooltip(p, bars_color_input_boundary, "Bar color (RRGGBB)", SIDE_TOP, false);
+    tooltip(p, bars_color_input_boundary, "Bar color (RGB or RRGGBB)", SIDE_TOP, false);
     x += text_input_width;
-
-
-#ifdef MUSIALIZER_MICROPHONE
-    state = microphone_button((CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-    x += HUD_BUTTON_SIZE;
-    if (state & BS_CLICKED) {
-        interacted = true;
-        start_capture();
-    }
-#endif // MUSIALIZER_MICROPHONE
 
     // TODO: implement "add new track" button that uses tinyfiledialogs
 
@@ -1431,10 +1335,6 @@ static void preview_screen(void)
             PlayMusicStream(p->tracks.items[0].music);
         }
     }
-
-#ifdef MUSIALIZER_MICROPHONE
-    if (p->active_text_input_id == 0 && IsKeyPressed(KEY_CAPTURE)) start_capture();
-#endif // MUSIALIZER_MICROPHONE
 
     Track *track = current_track();
     if (track) { // The music is loaded and ready
@@ -1595,72 +1495,6 @@ static void preview_screen(void)
         }
     }
 }
-
-#ifdef MUSIALIZER_MICROPHONE
-static void capture_screen(void)
-{
-    int w = GetScreenWidth();
-    int h = GetScreenHeight();
-
-    if (p->microphone_working) {
-        if (IsKeyPressed(KEY_CAPTURE) || IsKeyPressed(KEY_ESCAPE)) {
-            // Microphone is working, so it needs to be uninited
-            ma_device_uninit(&p->microphone);
-            drwav_uninit(&p->wav);
-            p->microphone_working = false;
-            p->capturing = false;
-
-            const char *recording_file_path = "recording.wav";
-            Music music = LoadMusicStream(recording_file_path);
-            if (IsMusicValid(music)) {
-                AttachAudioStreamProcessor(music.stream, callback);
-                char *file_path = strdup(recording_file_path);
-                assert(file_path != NULL);
-                nob_da_append(&p->tracks, (CLITERAL(Track) {
-                    .file_path = file_path,
-                    .music = music,
-                }));
-            } else {
-                popup_tray_push(&p->pt);
-            }
-
-            if (current_track() == NULL && p->tracks.count > 0) {
-                p->current_track = 0;
-                PlayMusicStream(p->tracks.items[0].music);
-            }
-        }
-
-
-        size_t m = fft_analyze(GetFrameTime());
-        fft_render(CLITERAL(Rectangle) {
-            0, 0, GetScreenWidth(), GetScreenHeight()
-        }, m);
-    } else {
-        if (IsKeyPressed(KEY_ESCAPE)) {
-            // Microphone is not working, so it does no need to be uninited
-            p->capturing = false;
-        }
-
-        // TODO: report capture device error via the popup mechanism.
-        const char *label = "Capture Device Error: Check the Logs";
-        Color color = RED;
-        int fontSize = p->font.baseSize;
-        Vector2 size = MeasureTextEx(p->font, label, fontSize, 0);
-        Vector2 position = {
-            w/2 - size.x/2,
-            h/2 - size.y/2,
-        };
-        DrawTextEx(p->font, label, position, fontSize, 0, color);
-
-        label = "(Press ESC to Continue)";
-        fontSize = p->font.baseSize*2/3;
-        size = MeasureTextEx(p->font, label, fontSize, 0);
-        position.x = w/2 - size.x/2,
-        position.y = h/2 - size.y/2 + fontSize,
-        DrawTextEx(p->font, label, position, fontSize, 0, color);
-    }
-}
-#endif // MUSIALIZER_MICROPHONE
 
 static void rendering_screen(void)
 {
@@ -1882,15 +1716,7 @@ MUSIALIZER_PLUG void plug_update(void)
     begin_tooltip_frame();
 
     if (!p->rendering) { // We are in the Preview Mode
-#ifdef MUSIALIZER_MICROPHONE
-        if (p->capturing) {
-            capture_screen();
-        } else {
-            preview_screen();
-        }
-#else
         preview_screen();
-#endif // MUSIALIZER_MICROPHONE
     } else { // We are in the Rendering Mode
         rendering_screen();
     }

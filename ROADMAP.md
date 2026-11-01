@@ -10,6 +10,12 @@
 
 - [[DONE]](DONE) Configurable graph bar width (multiplier).
 
-- Option to have bars change color depending on amplitude.
+- Option to have bars change color depending on amplitude (like a "heat-map mode").
 
 - [[DONE]](DONE) New icon for diferentiation 
+
+- [[DONE]](DONE) Remove the microphone stuff.
+
+- Refactor UI code to the point of easy readability.
+
+- Remove the hot-reload bullshit clearly added just to show off.
