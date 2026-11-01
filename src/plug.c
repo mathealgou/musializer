@@ -90,7 +90,7 @@ void *plug_load_resource(const char *file_path, size_t *size)
 #define COLOR_TOOLTIP_FOREGROUND      WHITE
 #define HUD_TIMER_SECS 1.0f
 #define HUD_BUTTON_SIZE 50
-#define HUD_BUTTON_MARGIN 50
+#define HUD_BUTTON_MARGIN 10
 #define TEXT_INPUT_SIZE 200
 #define HUD_ICON_SCALE 0.5
 #define HUD_POPUP_LIFETIME_SECS 2.0f
@@ -1213,6 +1213,9 @@ static bool toolbar(Track *track, Rectangle boundary)
     bool interacted = false;
     int state = 0;
 
+    int x_offset_button = HUD_BUTTON_SIZE + HUD_BUTTON_MARGIN;
+
+    int x_offset_text_input = TEXT_INPUT_SIZE + HUD_BUTTON_MARGIN;
 
     size_t buttons_count = 5;
     if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 9)) return interacted;
@@ -1227,7 +1230,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         HUD_BUTTON_SIZE,
         HUD_BUTTON_SIZE,
     }));
-    x += HUD_BUTTON_SIZE;
+    x += x_offset_button;
     if (state & BS_CLICKED) {
         interacted = true;
         toggle_track_playing(track);
@@ -1239,7 +1242,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         HUD_BUTTON_SIZE,
         HUD_BUTTON_SIZE,
     }));
-    x += HUD_BUTTON_SIZE;
+    x += x_offset_button;
     if (state & BS_CLICKED) {
         interacted = true;
         start_rendering_track(track);
@@ -1251,7 +1254,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         HUD_BUTTON_SIZE,
         HUD_BUTTON_SIZE,
     }));
-    x += HUD_BUTTON_SIZE;
+    x += x_offset_button;
     if (state & BS_CLICKED) {
         interacted = true;
     }
@@ -1262,7 +1265,9 @@ static bool toolbar(Track *track, Rectangle boundary)
         HUD_BUTTON_SIZE,
         HUD_BUTTON_SIZE,
     }));
-    x += HUD_BUTTON_SIZE;
+
+    x += x_offset_button;
+
     if (state & BS_CLICKED) {
         interacted = true;
     }
@@ -1279,7 +1284,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
     tooltip(p, bars_color_input_boundary, "Bar color (RGB or RRGGBB)", SIDE_TOP, false);
-    x += TEXT_INPUT_SIZE;
+    x += x_offset_text_input;
 
     Rectangle background_color_input_boundary = {
         x,
@@ -1292,7 +1297,7 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
     tooltip(p, background_color_input_boundary, "Background color (RGB or RRGGBB)", SIDE_TOP, false);
-    x += TEXT_INPUT_SIZE;
+    x += x_offset_text_input;
 
     if (
         IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
