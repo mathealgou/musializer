@@ -196,6 +196,9 @@ typedef struct {
     bool fullscreen;
     bool castrated;
     bool wide_bois;
+    char bars_color[7];
+    Color bars_color_value;
+    bool custom_bars_color;
 
 
     // Renderer
@@ -218,6 +221,7 @@ typedef struct {
     //   Extracted from https://github.com/tsoding/musializer/pull/11
 
     uint64_t active_button_id;
+    uint64_t active_text_input_id;
 
     Popup_Tray pt;
 
@@ -340,6 +344,36 @@ static size_t fft_analyze(float dt)
     return m;
 }
 
+static bool color_from_rgb_hex(const char *text, Color *color)
+{
+    if (strlen(text) != 6) return false;
+
+    unsigned int value = 0;
+    for (size_t i = 0; i < 6; ++i) {
+        char c = text[i];
+        unsigned int digit;
+        if (c >= '0' && c <= '9') {
+            digit = (unsigned int)(c - '0');
+        } else if (c >= 'A' && c <= 'F') {
+            digit = (unsigned int)(c - 'A' + 10);
+        } else if (c >= 'a' && c <= 'f') {
+            digit = (unsigned int)(c - 'a' + 10);
+        } else {
+            return false;
+        }
+        value = (value << 4) | digit;
+    }
+
+    *color = GetColor((value << 8) | 0xFF);
+    return true;
+}
+
+static Color fft_bar_color(size_t index, size_t count)
+{
+    if (p->custom_bars_color) return p->bars_color_value;
+    return ColorFromHSV((float)index/count*360, 0.75f, 1.0f);
+}
+
 // (size_t m) is the number of bars
 // what kind of maniac names variables like that???
 // and why the fuck would you make a size_t????????
@@ -352,18 +386,12 @@ static void fft_render(Rectangle boundary, size_t m)
     int number_of_bars = m - HIGH_FREQUENCY_BARS_IGNORED_IN_GRAPH;
 
     // The width of a single bar
-    float cell_width = boundary.width/number_of_bars;
-
-    // Global color parameters
-    float saturation = 0.75f;
-    float value = 1.0f;
-
+    float cell_width = (boundary.width/number_of_bars) + 1;
 
     // Display the Bars
     for (int i = 0; i < number_of_bars; ++i) {
         float t = p->out_smooth[i];
-        float hue = (float)i/number_of_bars;
-        Color color = ColorFromHSV(hue*360, saturation, value);
+        Color color = fft_bar_color(i, number_of_bars);
 
         // Handle the wide bois
         int x_position;
@@ -412,8 +440,7 @@ static void fft_render(Rectangle boundary, size_t m)
     for (int i = 0; i < number_of_bars; ++i) {
         float start = p->out_smear[i];
         float end = p->out_smooth[i];
-        float hue = (float)i/number_of_bars;
-        Color color = ColorFromHSV(hue*360, saturation, value);
+        Color color = fft_bar_color(i, number_of_bars);
 
         // Handle the wide bois
         int x_position;
@@ -461,8 +488,7 @@ static void fft_render(Rectangle boundary, size_t m)
     BeginShaderMode(p->circle);
     for (int i = 0; i < number_of_bars; ++i) {
         float t = p->out_smooth[i];
-        float hue = (float)i/number_of_bars;
-        Color color = ColorFromHSV(hue*360, saturation, value);
+        Color color = fft_bar_color(i, number_of_bars);
 
         // Handle the wide bois
         int x_position;
@@ -981,7 +1007,9 @@ static int fullscreen_button_with_loc(const char *file, int line, Rectangle full
     return state;
 }
 
-#include "ui.c"
+// No module system in ol-ass lang
+// just copypaste macro 
+#include "ui.c" 
 
 static void popup_tray(Popup_Tray *pt, Rectangle preview_boundary)
 {
@@ -1264,7 +1292,7 @@ static bool toolbar(Track *track, Rectangle boundary)
     size_t buttons_count = 5;
 #endif // MUSIALIZER_MICROPHONE
 
-    if (boundary.width < HUD_BUTTON_SIZE*buttons_count) return interacted;
+    if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 5)) return interacted;
 
     DrawRectangleRec(boundary, COLOR_TRACK_PANEL_BACKGROUND);
 
@@ -1316,6 +1344,21 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
 
+    float text_input_width = HUD_BUTTON_SIZE*4;
+    Rectangle bars_color_input_boundary = {
+        x,
+        boundary.y,
+        text_input_width,
+        HUD_BUTTON_SIZE,
+    };
+    if (text_input(p, p->bars_color, sizeof(p->bars_color), bars_color_input_boundary)) {
+        p->custom_bars_color = color_from_rgb_hex(p->bars_color, &p->bars_color_value);
+        interacted = true;
+    }
+    tooltip(p, bars_color_input_boundary, "Bar color (RRGGBB)", SIDE_TOP, false);
+    x += text_input_width;
+
+
 #ifdef MUSIALIZER_MICROPHONE
     state = microphone_button((CLITERAL(Rectangle) {
         x,
@@ -1352,6 +1395,9 @@ static bool toolbar(Track *track, Rectangle boundary)
         p->fullscreen = !p->fullscreen;
     }
 
+
+
+
     return interacted;
 }
 
@@ -1387,23 +1433,25 @@ static void preview_screen(void)
     }
 
 #ifdef MUSIALIZER_MICROPHONE
-    if (IsKeyPressed(KEY_CAPTURE)) start_capture();
+    if (p->active_text_input_id == 0 && IsKeyPressed(KEY_CAPTURE)) start_capture();
 #endif // MUSIALIZER_MICROPHONE
 
     Track *track = current_track();
     if (track) { // The music is loaded and ready
         UpdateMusicStream(track->music);
 
-        if (IsKeyPressed(KEY_TOGGLE_PLAY)) {
-            toggle_track_playing(track);
-        }
+        if (p->active_text_input_id == 0) {
+            if (IsKeyPressed(KEY_TOGGLE_PLAY)) {
+                toggle_track_playing(track);
+            }
 
-        if (IsKeyPressed(KEY_RENDER)) {
-            start_rendering_track(track);
-        }
+            if (IsKeyPressed(KEY_RENDER)) {
+                start_rendering_track(track);
+            }
 
-        if (IsKeyPressed(KEY_FULLSCREEN)) {
-            p->fullscreen = !p->fullscreen;
+            if (IsKeyPressed(KEY_FULLSCREEN)) {
+                p->fullscreen = !p->fullscreen;
+            }
         }
 
         size_t m = fft_analyze(GetFrameTime());
@@ -1799,6 +1847,7 @@ MUSIALIZER_PLUG void plug_init(void)
     p->current_track = -1;
     p->castrated = false;
     p->wide_bois = true;
+    p->custom_bars_color = false;
 
     // TODO: restore master volume between sessions
     SetMasterVolume(0.5);

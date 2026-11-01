@@ -118,7 +118,10 @@ static bool volume_slider_with_location(Plug *plug, const char *file, int line, 
     id = djb2(id, file, strlen(file));
     id = djb2(id, &line, sizeof(line));
     int volume_icon_state = button_with_id(plug, id, volume_icon_boundary);
-    if (IsKeyPressed(KEY_TOGGLE_MUTE) || (volume_icon_state & BS_CLICKED)) {
+    if (
+        (plug->active_text_input_id == 0 && IsKeyPressed(KEY_TOGGLE_MUTE)) ||
+        (volume_icon_state & BS_CLICKED)
+    ) {
         if (volume > 0) {
             saved_volume = volume;
             volume = 0;
@@ -166,4 +169,65 @@ static int checkbox_with_location(Plug *plug, const char *file, int line, bool *
 
     tooltip(plug, boundary, tooltip_text, SIDE_TOP, false);
     return state;
+}
+
+#define text_input(plug, text, text_capacity, boundary) \
+    text_input_with_location((plug), __FILE__, __LINE__, (text), (text_capacity), (boundary))
+static bool text_input_with_location(Plug *plug, const char *file, int line, char *text, size_t text_capacity, Rectangle boundary)
+{
+    assert(text_capacity > 0);
+
+    uint64_t id = DJB2_INIT;
+    id = djb2(id, file, strlen(file));
+    id = djb2(id, &line, sizeof(line));
+
+    bool hovered = CheckCollisionPointRec(GetMousePosition(), boundary);
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        plug->active_text_input_id = hovered ? id : 0;
+    }
+
+    bool focused = plug->active_text_input_id == id;
+    bool changed = false;
+    size_t text_length = strlen(text);
+
+    if (focused) {
+        int key = GetCharPressed();
+        while (key > 0) {
+            if (key >= 32 && key <= 126 && text_length + 1 < text_capacity) {
+                text[text_length++] = (char)key;
+                text[text_length] = '\0';
+                changed = true;
+            }
+            key = GetCharPressed();
+        }
+
+        if (IsKeyPressed(KEY_BACKSPACE) && text_length > 0) {
+            text[--text_length] = '\0';
+            changed = true;
+        }
+    }
+
+    Color background = focused ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
+    Color border = focused ? COLOR_ACCENT : hovered ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
+    DrawRectangleRounded(boundary, 0.2f, 20, background);
+    DrawRectangleLinesEx(boundary, 2.0f, border);
+
+    float font_size = boundary.height*0.5f;
+    float spacing = 0.0f;
+    Vector2 text_position = {
+        .x = boundary.x + boundary.height*0.3f,
+        .y = boundary.y + boundary.height/2 - font_size/2,
+    };
+    DrawTextEx(plug->font, text, text_position, font_size, spacing, WHITE);
+
+    if (focused && ((int)(GetTime()*2.0) % 2 == 0)) {
+        float cursor_x = text_position.x + MeasureTextEx(plug->font, text, font_size, spacing).x;
+        DrawLineEx(
+            (Vector2) { cursor_x, text_position.y },
+            (Vector2) { cursor_x, text_position.y + font_size },
+            2.0f,
+            WHITE);
+    }
+
+    return changed;
 }
