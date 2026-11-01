@@ -4,7 +4,7 @@
 
 - [[DONE]](DONE) Being able to select a single color for the bars of the graph.
 
-- Being able to select the background color of the graph.
+- [[DONE]](DONE) Being able to select the background color of the graph.
 
 - Image background for the graph.
 

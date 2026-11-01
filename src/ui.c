@@ -182,8 +182,8 @@ static bool text_input_with_location(Plug *plug, const char *file, int line, cha
     id = djb2(id, &line, sizeof(line));
 
     bool hovered = CheckCollisionPointRec(GetMousePosition(), boundary);
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-        plug->active_text_input_id = hovered ? id : 0;
+    if (hovered && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        plug->active_text_input_id = id;
     }
 
     bool focused = plug->active_text_input_id == id;

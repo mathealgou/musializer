@@ -91,6 +91,7 @@ void *plug_load_resource(const char *file_path, size_t *size)
 #define HUD_TIMER_SECS 1.0f
 #define HUD_BUTTON_SIZE 50
 #define HUD_BUTTON_MARGIN 50
+#define TEXT_INPUT_SIZE 200
 #define HUD_ICON_SCALE 0.5
 #define HUD_POPUP_LIFETIME_SECS 2.0f
 #define HUD_POPUP_SLIDEIN_SECS 0.1f
@@ -193,6 +194,9 @@ typedef struct {
     char bars_color[7];
     Color bars_color_value;
     bool custom_bars_color;
+    char background_color[7];
+    Color background_color_value;
+    bool custom_background_color;
 
 
     // Renderer
@@ -383,6 +387,12 @@ static Color fft_bar_color(size_t index, size_t count)
 {
     if (p->custom_bars_color) return p->bars_color_value;
     return ColorFromHSV((float)index/count*360, 0.75f, 1.0f);
+}
+
+static Color fft_background_color(void)
+{
+    if (p->custom_background_color) return p->background_color_value;
+    return COLOR_BACKGROUND;
 }
 
 // (size_t m) is the number of bars
@@ -1205,7 +1215,7 @@ static bool toolbar(Track *track, Rectangle boundary)
 
 
     size_t buttons_count = 5;
-    if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 5)) return interacted;
+    if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 9)) return interacted;
 
     DrawRectangleRec(boundary, COLOR_TRACK_PANEL_BACKGROUND);
 
@@ -1257,19 +1267,40 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
 
-    float text_input_width = HUD_BUTTON_SIZE*4;
     Rectangle bars_color_input_boundary = {
         x,
         boundary.y,
-        text_input_width,
+        TEXT_INPUT_SIZE,
         HUD_BUTTON_SIZE,
     };
+    
     if (text_input(p, p->bars_color, sizeof(p->bars_color), bars_color_input_boundary)) {
         p->custom_bars_color = color_from_rgb_hex(p->bars_color, &p->bars_color_value);
         interacted = true;
     }
     tooltip(p, bars_color_input_boundary, "Bar color (RGB or RRGGBB)", SIDE_TOP, false);
-    x += text_input_width;
+    x += TEXT_INPUT_SIZE;
+
+    Rectangle background_color_input_boundary = {
+        x,
+        boundary.y,
+        TEXT_INPUT_SIZE,
+        HUD_BUTTON_SIZE,
+    };
+    if (text_input(p, p->background_color, sizeof(p->background_color), background_color_input_boundary)) {
+        p->custom_background_color = color_from_rgb_hex(p->background_color, &p->background_color_value);
+        interacted = true;
+    }
+    tooltip(p, background_color_input_boundary, "Background color (RGB or RRGGBB)", SIDE_TOP, false);
+    x += TEXT_INPUT_SIZE;
+
+    if (
+        IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
+        !CheckCollisionPointRec(GetMousePosition(), bars_color_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), background_color_input_boundary)
+    ) {
+        p->active_text_input_id = 0;
+    }
 
     // TODO: implement "add new track" button that uses tinyfiledialogs
 
@@ -1600,7 +1631,7 @@ static void rendering_screen(void)
             size_t m = fft_analyze(1.0f/RENDER_FPS);
 
             BeginTextureMode(p->screen);
-            ClearBackground(COLOR_BACKGROUND);
+            ClearBackground(fft_background_color());
             fft_render(CLITERAL(Rectangle) {
                 0, 0, p->screen.texture.width, p->screen.texture.height
             }, m);
@@ -1667,6 +1698,7 @@ void plug_init(void)
     p->castrated = false;
     p->wide_bois = true;
     p->custom_bars_color = false;
+    p->custom_background_color = false;
 
     // TODO: restore master volume between sessions
     SetMasterVolume(0.5);
@@ -1676,7 +1708,7 @@ void plug_init(void)
 void plug_update(void)
 {
     BeginDrawing();
-    ClearBackground(COLOR_BACKGROUND);
+    ClearBackground(fft_background_color());
 
     begin_tooltip_frame();
 
