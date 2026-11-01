@@ -74,6 +74,8 @@ MUSIALIZER_PLUG void *plug_load_resource(const char *file_path, size_t *size)
 
 #define PREVIEW_FPS 60
 
+#define HIGH_FREQUENCY_BARS_IGNORED_IN_GRAPH 10
+
 #define RENDER_FPS 30
 #define RENDER_FACTOR 100
 #define RENDER_WIDTH (16*RENDER_FACTOR)
@@ -345,18 +347,22 @@ static size_t fft_analyze(float dt)
 static void fft_render(Rectangle boundary, size_t m)
 {
     bool wide_bois = p->wide_bois;
+    
+    // 
+    int number_of_bars = m - HIGH_FREQUENCY_BARS_IGNORED_IN_GRAPH;
 
     // The width of a single bar
-    float cell_width = boundary.width/m;
+    float cell_width = boundary.width/number_of_bars;
 
     // Global color parameters
     float saturation = 0.75f;
     float value = 1.0f;
 
+
     // Display the Bars
-    for (size_t i = 0; i < m; ++i) {
+    for (int i = 0; i < number_of_bars; ++i) {
         float t = p->out_smooth[i];
-        float hue = (float)i/m;
+        float hue = (float)i/number_of_bars;
         Color color = ColorFromHSV(hue*360, saturation, value);
 
         // Handle the wide bois
@@ -403,10 +409,10 @@ static void fft_render(Rectangle boundary, size_t m)
     SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.3f }, SHADER_UNIFORM_FLOAT);
     SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 3.0f }, SHADER_UNIFORM_FLOAT);
     BeginShaderMode(p->circle);
-    for (size_t i = 0; i < m; ++i) {
+    for (int i = 0; i < number_of_bars; ++i) {
         float start = p->out_smear[i];
         float end = p->out_smooth[i];
-        float hue = (float)i/m;
+        float hue = (float)i/number_of_bars;
         Color color = ColorFromHSV(hue*360, saturation, value);
 
         // Handle the wide bois
@@ -453,9 +459,9 @@ static void fft_render(Rectangle boundary, size_t m)
     SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.07f }, SHADER_UNIFORM_FLOAT);
     SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 5.0f }, SHADER_UNIFORM_FLOAT);
     BeginShaderMode(p->circle);
-    for (size_t i = 0; i < m; ++i) {
+    for (int i = 0; i < number_of_bars; ++i) {
         float t = p->out_smooth[i];
-        float hue = (float)i/m;
+        float hue = (float)i/number_of_bars;
         Color color = ColorFromHSV(hue*360, saturation, value);
 
         // Handle the wide bois
