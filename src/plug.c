@@ -18,25 +18,19 @@
 #include <raylib.h>
 #include <rlgl.h>
 
-#if defined(_WIN32) && defined(MUSIALIZER_HOTRELOAD)
-    #define MUSIALIZER_PLUG __declspec(dllexport)
-#else
-    #define MUSIALIZER_PLUG
-#endif
-
-#define PLUG(name, ret, ...) MUSIALIZER_PLUG ret name(__VA_ARGS__);
+#define PLUG(name, ret, ...) ret name(__VA_ARGS__);
 LIST_OF_PLUGS
 #undef PLUG
 
 #ifndef MUSIALIZER_UNBUNDLE
 #include "build/bundle.h"
 
-MUSIALIZER_PLUG void plug_free_resource(void *data)
+void plug_free_resource(void *data)
 {
     (void) data;
 }
 
-MUSIALIZER_PLUG void *plug_load_resource(const char *file_path, size_t *size)
+void *plug_load_resource(const char *file_path, size_t *size)
 {
     for (size_t i = 0; i < resources_count; ++i) {
         if (strcmp(resources[i].file_path, file_path) == 0) {
@@ -49,12 +43,12 @@ MUSIALIZER_PLUG void *plug_load_resource(const char *file_path, size_t *size)
 
 #else
 
-MUSIALIZER_PLUG void plug_free_resource(void *data)
+void plug_free_resource(void *data)
 {
     UnloadFileData(data);
 }
 
-MUSIALIZER_PLUG void *plug_load_resource(const char *file_path, size_t *size)
+void *plug_load_resource(const char *file_path, size_t *size)
 {
     int dataSize;
     void *data = LoadFileData(file_path, &dataSize);
@@ -1661,16 +1655,7 @@ static void load_assets(void)
     }
 }
 
-static void unload_assets()
-{
-    UnloadFont(p->font);
-    UnloadShader(p->circle);
-    for (UI_Icon icon = 0; icon < COUNT_UI_ICONS; ++icon) {
-        UnloadTexture(p->icon_textures[icon]);
-    }
-}
-
-MUSIALIZER_PLUG void plug_init(void)
+void plug_init(void)
 {
     p = malloc(sizeof(*p));
     assert(p != NULL && "Buy more RAM lol");
@@ -1688,27 +1673,7 @@ MUSIALIZER_PLUG void plug_init(void)
     SetTargetFPS(PREVIEW_FPS);
 }
 
-MUSIALIZER_PLUG void *plug_pre_reload(void)
-{
-    for (size_t i = 0; i < p->tracks.count; ++i) {
-        Track *it = &p->tracks.items[i];
-        DetachAudioStreamProcessor(it->music.stream, callback);
-    }
-    unload_assets();
-    return p;
-}
-
-MUSIALIZER_PLUG void plug_post_reload(void *pp)
-{
-    p = pp;
-    for (size_t i = 0; i < p->tracks.count; ++i) {
-        Track *it = &p->tracks.items[i];
-        AttachAudioStreamProcessor(it->music.stream, callback);
-    }
-    load_assets();
-}
-
-MUSIALIZER_PLUG void plug_update(void)
+void plug_update(void)
 {
     BeginDrawing();
     ClearBackground(COLOR_BACKGROUND);

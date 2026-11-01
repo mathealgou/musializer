@@ -9,7 +9,7 @@
 #include <signal.h> // needed for sigaction()
 #endif // _WIN32
 
-#include "./hotreload.h"
+#include "plug.h"
 
 int main(void)
 {
@@ -22,8 +22,6 @@ int main(void)
     act.sa_handler = SIG_IGN;
     sigaction(SIGPIPE, &act, NULL);
 #endif // _WIN32
-
-    if (!reload_libplug()) return 1;
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_WINDOW_ALWAYS_RUN);
     size_t factor = 80;
@@ -41,11 +39,6 @@ int main(void)
 
     plug_init();
     while (!WindowShouldClose()) {
-        if (IsKeyPressed(KEY_H)) {
-            void *state = plug_pre_reload();
-            if (!reload_libplug()) return 1;
-            plug_post_reload(state);
-        }
         plug_update();
     }
 

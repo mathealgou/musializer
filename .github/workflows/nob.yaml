@@ -59,11 +59,8 @@ jobs:
           name: release-linux
           path: musializer-linux-x86_64.tar.gz
   windows:
-    name: windows (${{ matrix.hotreload == true && 'hotreload' || '' }})
+    name: windows
     runs-on: windows-latest
-    strategy:
-      matrix:
-        hotreload: [true, false]
     steps:
       - name: Clone GIT repo
         uses: actions/checkout@v4
@@ -80,16 +77,16 @@ jobs:
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do call "%%i\VC\Auxiliary\Build\vcvars64.bat"
-          nob.exe config ${{ matrix.hotreload == true && 'hotreload' || '' }}
+          nob.exe config
           nob.exe
       - name: Upload build folder
         uses: actions/upload-artifact@v4
         with:
-          name: windows-${{ matrix.hotreload == true && 'hotreload' || '' }}-build-folder
+          name: windows-build-folder
           path: build/
       # `nob dist` is not implemented for the MSVC target, so package by hand
       - name: Package release
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.hotreload == false
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         shell: pwsh
         run: |
           New-Item -ItemType Directory musializer-win64
@@ -98,7 +95,7 @@ jobs:
           Copy-Item musializer-logged.bat musializer-win64/
           Compress-Archive -Path musializer-win64 -DestinationPath musializer-win64.zip
       - name: Upload release package
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push' && matrix.hotreload == false
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: release-windows

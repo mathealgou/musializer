@@ -59,11 +59,6 @@ typedef struct {
 
 static Feature_Flag feature_flags[] = {
     {
-        .macro = "MUSIALIZER_HOTRELOAD",
-        .name = "hotreload",
-        .description = "Moves everything in src/plug.c to a separate \"DLL\" so it can be hotreloaded.",
-    },
-    {
         .macro = "MUSIALIZER_UNBUNDLE",
         .name = "unbundle",
         .description = "Don't bundle resources/ folder with the executable and load the resources directly from the folder.",
@@ -75,7 +70,6 @@ static Feature_Flag feature_flags[] = {
     },
 };
 
-// Removed feature flags
 #ifdef MUSIALIZER_ACT_ON_PRESS
 #error "MUSIALIZER_ACT_ON_PRESS no longer exists. Please remove it from your build/config.h"
 #endif // MUSIALIZER_ACT_ON_PRESS

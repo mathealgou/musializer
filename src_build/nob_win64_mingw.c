@@ -12,54 +12,12 @@ bool build_musializer(void)
 {
     bool result = true;
     Cmd cmd = {0};
-    Procs procs = {0};
-
     cmd_append(&cmd, MAYBE_PREFIXED("windres"));
     cmd_append(&cmd, "./src/musializer.rc");
     cmd_append(&cmd, "-O", "coff");
     cmd_append(&cmd, "-o", "./build/musializer.res");
     if (!cmd_run(&cmd)) return_defer(false);
 
-#ifdef MUSIALIZER_HOTRELOAD
-    cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-    cmd_append(&cmd, "-mwindows", "-Wall", "-Wextra", "-ggdb");
-    cmd_append(&cmd, "-I.");
-    cmd_append(&cmd, "-I"RAYLIB_SRC_FOLDER);
-    cmd_append(&cmd, "-fPIC", "-shared");
-    cmd_append(&cmd, "-static-libgcc");
-    cmd_append(&cmd, "-o", "./build/libplug.dll");
-    cmd_append(&cmd,
-        "./src/plug.c",
-        "./src/ffmpeg_windows.c",
-        "./thirdparty/tinyfiledialogs.c");
-    cmd_append(&cmd,
-        "-L./build",
-        "-l:raylib.dll");
-    cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lole32");
-    if (!cmd_run(&cmd, .async = &procs)) return_defer(false);
-
-    cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-    cmd_append(&cmd, "-mwindows", "-Wall", "-Wextra", "-ggdb");
-    cmd_append(&cmd, "-I.");
-    cmd_append(&cmd, "-I"RAYLIB_SRC_FOLDER);
-    cmd_append(&cmd, "-o", "./build/musializer");
-    cmd_append(&cmd,
-        "./src/musializer.c",
-        "./src/hotreload_windows.c");
-    cmd_append(&cmd,
-        "-Wl,-rpath=./build/",
-        "-Wl,-rpath=./",
-        temp_sprintf("-Wl,-rpath=./build/raylib/%s", MUSIALIZER_TARGET_NAME),
-        // NOTE: just in case somebody wants to run musializer from within the ./build/ folder
-        temp_sprintf("-Wl,-rpath=./raylib/%s", MUSIALIZER_TARGET_NAME));
-    cmd_append(&cmd,
-        "-L./build",
-        "-l:raylib.dll");
-    cmd_append(&cmd, "-lwinmm", "-lgdi32");
-    if (!cmd_run(&cmd, .async = &procs)) return_defer(false);
-
-    if (!procs_flush(&procs)) return_defer(false);
-#else
     cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
     cmd_append(&cmd, "-mwindows", "-Wall", "-Wextra", "-ggdb");
     cmd_append(&cmd, "-I.");
@@ -78,11 +36,9 @@ bool build_musializer(void)
     cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lole32");
     cmd_append(&cmd, "-static");
     if (!cmd_run(&cmd)) return_defer(false);
-#endif // MUSIALIZER_HOTRELOAD
 
 defer:
     cmd_free(cmd);
-    da_free(procs);
     return result;
 }
 
@@ -126,7 +82,6 @@ bool build_raylib()
 
     if (!procs_flush(&procs)) return_defer(false);
 
-#ifndef MUSIALIZER_HOTRELOAD
     const char *libraylib_path = temp_sprintf("%s/libraylib.a", build_path);
 
     if (needs_rebuild(libraylib_path, object_files.items, object_files.count)) {
@@ -138,22 +93,6 @@ bool build_raylib()
         }
         if (!cmd_run(&cmd)) return_defer(false);
     }
-#else
-    // it cannot load the raylib dll if it not in the same folder as the executable
-    const char *libraylib_path = "./build/raylib.dll";
-
-    if (needs_rebuild(libraylib_path, object_files.items, object_files.count)) {
-        cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
-        cmd_append(&cmd, "-shared");
-        cmd_append(&cmd, "-o", libraylib_path);
-        for (size_t i = 0; i < ARRAY_LEN(raylib_modules); ++i) {
-            const char *input_path = temp_sprintf("%s/%s.o", build_path, raylib_modules[i]);
-            cmd_append(&cmd, input_path);
-        }
-        cmd_append(&cmd, "-lwinmm", "-lgdi32");
-        if (!cmd_run(&cmd)) return_defer(false);
-    }
-#endif // MUSIALIZER_HOTRELOAD
 
 defer:
     cmd_free(cmd);
@@ -163,10 +102,6 @@ defer:
 
 bool build_dist(void)
 {
-#ifdef MUSIALIZER_HOTRELOAD
-    nob_log(ERROR, "We do not ship with hotreload enabled");
-    return false;
-#else
     if (!mkdir_if_not_exists("./musializer-win64-mingw/")) return false;
     if (!copy_file("./build/musializer.exe", "./musializer-win64-mingw/musializer.exe")) return false;
     if (!copy_directory_recursively("./resources/", "./musializer-win64-mingw/resources/")) return false;
@@ -181,5 +116,4 @@ bool build_dist(void)
     if (!ok) return false;
     nob_log(INFO, "Created %s", dist_path);
     return true;
-#endif // MUSIALIZER_HOTRELOAD
 }

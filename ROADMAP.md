@@ -18,4 +18,4 @@
 
 - Refactor UI code to the point of easy readability.
 
-- Remove the hot-reload bullshit clearly added just to show off.
+- [[DONE]](DONE) Remove the hot-reload bullshit clearly added just to show off.

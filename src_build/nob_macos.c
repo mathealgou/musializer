@@ -5,45 +5,6 @@ bool build_musializer(void)
 {
     bool result = true;
     Nob_Cmd cmd = {0};
-    Nob_Procs procs = {0};
-
-#ifdef MUSIALIZER_HOTRELOAD
-    procs.count = 0;
-    cmd.count = 0;
-        // TODO: add a way to replace `cc` with something else GCC compatible on POSIX
-        // Like `clang` for instance
-        nob_cmd_append(&cmd, "clang");
-        nob_cmd_append(&cmd, "-Wall", "-Wextra", "-g");
-        nob_cmd_append(&cmd, "-I.");
-        nob_cmd_append(&cmd, "-I"RAYLIB_SRC_FOLDER);
-        nob_cmd_append(&cmd, "-fPIC", "-shared");
-        nob_cmd_append(&cmd, "-o", "./build/libplug.dylib");
-        nob_cmd_append(&cmd,
-            "./src/plug.c",
-            "./src/ffmpeg_posix.c",
-            "./thirdparty/tinyfiledialogs.c");
-        nob_cmd_append(&cmd, "./build/raylib/macos/libraylib.dylib");
-        nob_cmd_append(&cmd, "-lm", "-ldl", "-lpthread");
-    nob_da_append(&procs, nob_cmd_run_async(cmd));
-
-    cmd.count = 0;
-        nob_cmd_append(&cmd, "clang");
-        nob_cmd_append(&cmd, "-Wall", "-Wextra", "-g");
-        nob_cmd_append(&cmd, "-I.");
-        nob_cmd_append(&cmd, "-I"RAYLIB_SRC_FOLDER);
-        nob_cmd_append(&cmd, "-o", "./build/musializer");
-        nob_cmd_append(&cmd,
-            "./src/musializer.c",
-            "./src/hotreload_posix.c");
-        nob_cmd_append(&cmd, "./build/raylib/macos/libraylib.dylib");
-        nob_cmd_append(&cmd, "-lm", "-ldl", "-lpthread");
-        nob_cmd_append(&cmd, "-rpath", "./build");
-        nob_cmd_append(&cmd, "-rpath", "./build/raylib/macos");
-        nob_cmd_append(&cmd, "-rpath", "./");
-        nob_cmd_append(&cmd, "-rpath", "./raylib/macos");
-    nob_da_append(&procs, nob_cmd_run_async(cmd));
-    if (!nob_procs_wait(procs)) nob_return_defer(false);
-#else
     cmd.count = 0;
         nob_cmd_append(&cmd, "clang");
         nob_cmd_append(&cmd, "-Wall", "-Wextra", "-g");
@@ -65,11 +26,9 @@ bool build_musializer(void)
 
         nob_cmd_append(&cmd, "-lm", "-ldl", "-lpthread");
     if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-#endif // MUSIALIZER_HOTRELOAD
 
 defer:
     nob_cmd_free(cmd);
-    nob_da_free(procs);
     return result;
 }
 
@@ -118,7 +77,6 @@ bool build_raylib(void)
 
     if (!nob_procs_wait(procs)) nob_return_defer(false);
 
-#ifndef MUSIALIZER_HOTRELOAD
     const char *libraylib_path = nob_temp_sprintf("%s/libraylib.a", build_path);
 
     if (nob_needs_rebuild(libraylib_path, object_files.items, object_files.count)) {
@@ -129,26 +87,6 @@ bool build_raylib(void)
         }
         if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
     }
-#else
-    const char *libraylib_path = nob_temp_sprintf("%s/libraylib.dylib", build_path);
-
-    if (nob_needs_rebuild(libraylib_path, object_files.items, object_files.count)) {
-        nob_cmd_append(&cmd, "cc");
-        nob_cmd_append(&cmd, "-shared", "-fPIC");
-        nob_cmd_append(&cmd, "-framework", "CoreVideo");
-        nob_cmd_append(&cmd, "-framework", "IOKit");
-        nob_cmd_append(&cmd, "-framework", "Cocoa");
-        nob_cmd_append(&cmd, "-framework", "GLUT");
-        nob_cmd_append(&cmd, "-framework", "OpenGL");
-        nob_cmd_append(&cmd, "-install_name", "@rpath/libraylib.dylib");
-        nob_cmd_append(&cmd, "-o", libraylib_path);
-        for (size_t i = 0; i < NOB_ARRAY_LEN(raylib_modules); ++i) {
-            const char *input_path = nob_temp_sprintf("%s/%s.o", build_path, raylib_modules[i]);
-            nob_cmd_append(&cmd, input_path);
-        }
-        if (!nob_cmd_run_sync(cmd)) nob_return_defer(false);
-    }
-#endif // MUSIALIZER_HOTRELOAD
 
 defer:
     nob_cmd_free(cmd);
@@ -158,10 +96,7 @@ defer:
 
 bool build_dist(void)
 {
-#if defined(MUSIALIZER_HOTRELOAD)
-    nob_log(NOB_ERROR, "We do not ship with hotreload enabled");
-    return false;
-#elif defined(MUSIALIZER_UNBUNDLE)
+#if defined(MUSIALIZER_UNBUNDLE)
     nob_log(NOB_ERROR, "We do not ship with unbundled resources");
     return false;
 #else
@@ -214,5 +149,5 @@ bool build_dist(void)
                         "./build/AppIcon.iconset");
     if (!nob_cmd_run_sync(cmd)) return false;
     return true;
-#endif // MUSIALIZER_HOTRELOAD
+#endif // MUSIALIZER_UNBUNDLE
 }
