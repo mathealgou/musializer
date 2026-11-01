@@ -193,6 +193,8 @@ typedef struct {
     int circle_power_location;
     bool fullscreen;
     bool castrated;
+    bool wide_bois;
+
 
     // Renderer
     bool rendering;
@@ -336,8 +338,14 @@ static size_t fft_analyze(float dt)
     return m;
 }
 
+// (size_t m) is the number of bars
+// what kind of maniac names variables like that???
+// and why the fuck would you make a size_t????????
+// they deserve the sanctions tbh
 static void fft_render(Rectangle boundary, size_t m)
 {
+    bool wide_bois = p->wide_bois;
+
     // The width of a single bar
     float cell_width = boundary.width/m;
 
@@ -350,15 +358,38 @@ static void fft_render(Rectangle boundary, size_t m)
         float t = p->out_smooth[i];
         float hue = (float)i/m;
         Color color = ColorFromHSV(hue*360, saturation, value);
+
+        // Handle the wide bois
+        int x_position;
+        if (wide_bois) {
+            x_position = i*cell_width;
+        }
+        else{
+            x_position = i*cell_width + cell_width/2;
+        }
+
         Vector2 startPos = {
-            boundary.x + i*cell_width + cell_width/2,
+            boundary.x + x_position,
             boundary.y + boundary.height - boundary.height*2/3*t,
         };
         Vector2 endPos = {
-            boundary.x + i*cell_width + cell_width/2,
+            boundary.x + x_position,
             boundary.y + boundary.height,
         };
-        float thick = cell_width/3*sqrtf(t);
+        // more wideboi dandling
+
+        // TODO: moron is calculating this for
+        // every single bar
+        // probably there is smarter way todo
+        float thick;
+
+        if (wide_bois){
+            thick = (cell_width);
+        } else{
+            thick = cell_width/3*sqrtf(t);
+        }
+
+
         DrawLineEx(startPos, endPos, thick, color);
     }
 
@@ -377,12 +408,21 @@ static void fft_render(Rectangle boundary, size_t m)
         float end = p->out_smooth[i];
         float hue = (float)i/m;
         Color color = ColorFromHSV(hue*360, saturation, value);
+
+        // Handle the wide bois
+        int x_position;
+        if (wide_bois) {
+            x_position = i*cell_width;
+        }
+        else{
+            x_position = i*cell_width + cell_width/2;
+        }
         Vector2 startPos = {
-            boundary.x + i*cell_width + cell_width/2,
+            boundary.x + x_position,
             boundary.y + boundary.height - boundary.height*2/3*start,
         };
         Vector2 endPos = {
-            boundary.x + i*cell_width + cell_width/2,
+            boundary.x + x_position,
             boundary.y + boundary.height - boundary.height*2/3*end,
         };
         float radius = cell_width*3*sqrtf(end);
@@ -417,8 +457,18 @@ static void fft_render(Rectangle boundary, size_t m)
         float t = p->out_smooth[i];
         float hue = (float)i/m;
         Color color = ColorFromHSV(hue*360, saturation, value);
+
+        // Handle the wide bois
+        int x_position;
+        if (wide_bois) {
+            x_position = i*cell_width;
+        }
+        else{
+            x_position = i*cell_width + cell_width/2;
+        }
+        
         Vector2 center = {
-            boundary.x + i*cell_width + cell_width/2,
+            boundary.x + x_position,
             boundary.y + boundary.height - boundary.height*2/3*t,
         };
         float radius = cell_width*6*sqrtf(t);
@@ -1263,6 +1313,38 @@ static int castrated_checkbox_with_location(const char *file, int line, Rectangl
 #define castrated_checkbox(boundary) \
     castrated_checkbox_with_location(__FILE__, __LINE__, (boundary))
 
+
+static int wide_bois_checkbox_with_location(const char *file, int line, Rectangle boundary)
+{
+    uint64_t id = DJB2_INIT;
+    id = djb2(id, file, strlen(file));
+    id = djb2(id, &line, sizeof(line));
+
+    int state = button_with_id(id, boundary);
+    if (state & BS_CLICKED) {
+        p->wide_bois = !p->wide_bois;
+    }
+
+    Rectangle checkbox = {
+        .x = boundary.x + boundary.width/2 - boundary.width*0.2f,
+        .y = boundary.y + boundary.height/2 - boundary.height*0.2f,
+        .width = boundary.width*0.4f,
+        .height = boundary.height*0.4f,
+    };
+    Color color = (state & BS_HOVEROVER) ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
+    DrawRectangleRounded(boundary, 0.2f, 20, color);
+    if (p->wide_bois) {
+        DrawRectangleRec(checkbox, COLOR_ACCENT);
+    }
+    DrawRectangleLinesEx(checkbox, 2, WHITE);
+
+    tooltip(boundary, "Wide Bois", SIDE_TOP, false);
+    return state;
+}
+
+#define wide_bois_checkbox(boundary) \
+    wide_bois_checkbox_with_location(__FILE__, __LINE__, (boundary))
+
 #ifdef MUSIALIZER_MICROPHONE
 #define microphone_button(boundary) \
     microphone_button_with_location(__FILE__, __LINE__, (boundary))
@@ -1427,6 +1509,17 @@ static bool toolbar(Track *track, Rectangle boundary)
     }
 
     state = castrated_checkbox((CLITERAL(Rectangle) {
+        x,
+        boundary.y,
+        HUD_BUTTON_SIZE,
+        HUD_BUTTON_SIZE,
+    }));
+    x += HUD_BUTTON_SIZE;
+    if (state & BS_CLICKED) {
+        interacted = true;
+    }
+
+    state = wide_bois_checkbox((CLITERAL(Rectangle) {
         x,
         boundary.y,
         HUD_BUTTON_SIZE,
@@ -1919,6 +2012,7 @@ MUSIALIZER_PLUG void plug_init(void)
     p->screen = LoadRenderTexture(RENDER_WIDTH, RENDER_HEIGHT);
     p->current_track = -1;
     p->castrated = false;
+    p->wide_bois = true;
 
     // TODO: restore master volume between sessions
     SetMasterVolume(0.5);

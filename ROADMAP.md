@@ -8,6 +8,9 @@
 
 - Image background for the graph.
 
-- Configurable graph bar width (multiplier).
+- [[DONE]](DONE) Configurable graph bar width (multiplier).
 
 - Option to have bars change color depending on amplitude.
+
+- [[DONE]](DONE) New icon for diferentiation 
+
