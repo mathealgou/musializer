@@ -25,3 +25,5 @@
 - BASS EXPLOSIONS (Particles when a particularly loud note below a given frequency (20-100 Hz?))
 
 - Make GitHub pages thing.
+
+- Disable auto play 
