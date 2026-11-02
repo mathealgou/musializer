@@ -27,3 +27,13 @@
 - Make GitHub pages thing.
 
 - Disable auto play 
+
+- Remove unnecessary volume slider
+
+- Make the thing work with stereo audio (apparently, bro wrote a mono audio application)
+
+- Remove useless playlist functionality
+
+- Add CLI (do '$musializer file.wav' and video comes out the other end)
+
+- Oscilloscope in place of/alongside bar graph
