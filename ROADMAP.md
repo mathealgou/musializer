@@ -16,6 +16,12 @@
 
 - [[DONE]](DONE) Remove the microphone stuff.
 
-- Refactor UI code to the point of easy readability.
+- Refactor UI code to the point of readability. (Yes, that's an entire task.)
 
 - [[DONE]](DONE) Remove the hot-reload bullshit clearly added just to show off.
+
+- Rainbow background 
+
+- BASS EXPLOSIONS (Particles when a particularly loud note below a given frequency (20-100 Hz?))
+
+- Make GitHub pages thing.
