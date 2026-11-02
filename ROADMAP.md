@@ -22,13 +22,13 @@
 
 - Rainbow background 
 
-- BASS EXPLOSIONS (Particles when a particularly loud note below a given frequency (20-100 Hz?))
+- [[DONE]](DONE) BASS EXPLOSIONS (Particles when a particularly loud note below a given frequency (20-100 Hz?))
 
 - Make GitHub pages thing.
 
 - Disable auto play 
 
-- Remove unnecessary volume slider
+- [[DONE]](DONE) Remove unnecessary volume slider
 
 - Make the thing work with stereo audio (apparently, bro wrote a mono audio application)
 

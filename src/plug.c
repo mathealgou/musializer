@@ -75,6 +75,7 @@ void *plug_load_resource(const char *file_path, size_t *size)
 #define RENDER_WIDTH (16*RENDER_FACTOR)
 #define RENDER_HEIGHT (9*RENDER_FACTOR)
 
+
 #define COLOR_ACCENT                  ColorFromHSV(225, 0.75, 0.8)
 #define COLOR_BACKGROUND              GetColor(0x151515FF)
 #define COLOR_TRACK_PANEL_BACKGROUND  ColorBrightness(COLOR_BACKGROUND, -0.1)
@@ -91,7 +92,7 @@ void *plug_load_resource(const char *file_path, size_t *size)
 #define HUD_TIMER_SECS 1.0f
 #define HUD_BUTTON_SIZE 50
 #define HUD_BUTTON_MARGIN 10
-#define TEXT_INPUT_SIZE 200
+#define TEXT_INPUT_SIZE 80
 #define HUD_ICON_SCALE 0.5
 #define HUD_POPUP_LIFETIME_SECS 2.0f
 #define HUD_POPUP_SLIDEIN_SECS 0.1f
@@ -191,6 +192,15 @@ typedef struct {
     bool fullscreen;
     bool castrated;
     bool wide_bois;
+    bool particles_enabled;
+    char particle_peak_threshold_text[16];
+    float particle_peak_threshold;
+    char particle_minimum_loudness_text[16];
+    float particle_minimum_loudness;
+    char particle_emitter_radius_text[16];
+    float particle_emitter_radius;
+    char particles_per_explosion_text[16];
+    int particles_per_explosion;
     char bars_color[7];
     Color bars_color_value;
     bool custom_bars_color;
@@ -232,6 +242,129 @@ typedef struct {
 } Plug;
 
 static Plug *p = NULL;
+
+// Particle stuff
+
+#define MAX_PARTICLES 10000
+#define PARTICLES_PER_EXPLOSION 100
+#define PARTICLE_EMITTER_RADIUS 50.0f
+#define PARTICLE_LIFETIME 0.5f
+#define PARTICLE_PEAK_DROP 0.01f
+#define PARTICLE_EXPLOSION_COOLDOWN 0.15f
+
+typedef struct Particle {
+    Vector2 position;       // Particle position on screen
+    Vector2 velocity;       // Particle current speed and direction
+    float radius;           // Particle radius
+    Color color;            // Particle color
+
+    float lifeTime;         // Particle life time
+    bool alive;             // Particle alive: inside screen and life time
+} Particle;
+
+typedef struct CircularBuffer {
+    int head;               // Index for the next write
+    int tail;               // Index for the next read
+    Particle *buffer;       // Particle buffer array
+} CircularBuffer;
+
+static Particle particles[MAX_PARTICLES];
+static CircularBuffer circularBuffer = { 0, 0, particles };
+static float particle_previous_intensity = 0.0f;
+static float particle_explosion_cooldown = 0.0f;
+
+static void EmitParticle(CircularBuffer *circularBuffer, Vector2 emitterPosition);
+static Particle *AddToCircularBuffer(CircularBuffer *circularBuffer);
+static void UpdateParticles(CircularBuffer *circularBuffer, int screenWidth, int screenHeight);
+static void UpdateCircularBuffer(CircularBuffer *circularBuffer);
+static void DrawParticles(CircularBuffer *circularBuffer);
+
+static void EmitParticle(CircularBuffer *circularBuffer, Vector2 emitterPosition)
+{
+    Particle *newParticle = AddToCircularBuffer(circularBuffer);
+
+    // If buffer is full, newParticle is NULL
+    if (newParticle != NULL)
+    {
+        // Fill particle properties
+        float spawn_direction = (float)(rand()%360)*DEG2RAD;
+        float spawn_radius = p->particle_emitter_radius*sqrtf((float)rand()/((float)RAND_MAX + 1.0f));
+        newParticle->position = (Vector2) {
+            emitterPosition.x + spawn_radius*cosf(spawn_direction),
+            emitterPosition.y + spawn_radius*sinf(spawn_direction),
+        };
+        newParticle->alive = true;
+        newParticle->lifeTime = 0.0f;
+        float speed = 3.0f + (float)(rand()%20)/5.0f;
+        newParticle->radius = 2.0f;
+        newParticle->color = WHITE;
+
+        float direction = (float)(rand()%360);
+        newParticle->velocity = (Vector2){ speed*cosf(direction*DEG2RAD), speed*sinf(direction*DEG2RAD) };
+    }
+}
+
+static Particle *AddToCircularBuffer(CircularBuffer *circularBuffer)
+{
+    Particle *particle = NULL;
+
+    // Check if buffer full
+    if (((circularBuffer->head + 1)%MAX_PARTICLES) != circularBuffer->tail)
+    {
+        // Add new particle to the head position and advance head
+        particle = &circularBuffer->buffer[circularBuffer->head];
+        circularBuffer->head = (circularBuffer->head + 1)%MAX_PARTICLES;
+    }
+
+    return particle;
+}
+
+static void UpdateParticles(CircularBuffer *circularBuffer, int screenWidth, int screenHeight)
+{
+    for (int i = circularBuffer->tail; i != circularBuffer->head; i = (i + 1)%MAX_PARTICLES)
+    {
+        // Update particle life and positions
+        circularBuffer->buffer[i].lifeTime += 1.0f/60.0f; // 60 FPS -> 1/60 seconds per frame
+
+        circularBuffer->buffer[i].position.x += circularBuffer->buffer[i].velocity.x;
+        circularBuffer->buffer[i].position.y += circularBuffer->buffer[i].velocity.y;
+
+        // Disable particles that have faded out or left the screen.
+        Vector2 center = circularBuffer->buffer[i].position;
+        float radius = circularBuffer->buffer[i].radius;
+
+        if (circularBuffer->buffer[i].lifeTime >= PARTICLE_LIFETIME ||
+            (center.x < -radius) || (center.x > (screenWidth + radius)) ||
+            (center.y < -radius) || (center.y > (screenHeight + radius)))
+        {
+            circularBuffer->buffer[i].alive = false;
+        }
+    }
+}
+
+static void UpdateCircularBuffer(CircularBuffer *circularBuffer)
+{
+    // Update circular buffer: advance tail over dead particles
+    while ((circularBuffer->tail != circularBuffer->head) && !circularBuffer->buffer[circularBuffer->tail].alive)
+    {
+        circularBuffer->tail = (circularBuffer->tail + 1)%MAX_PARTICLES;
+    }
+}
+
+static void DrawParticles(CircularBuffer *circularBuffer)
+{
+    for (int i = circularBuffer->tail; i != circularBuffer->head; i = (i + 1)%MAX_PARTICLES)
+    {
+        if (circularBuffer->buffer[i].alive)
+        {
+            float opacity = 1.0f - circularBuffer->buffer[i].lifeTime/PARTICLE_LIFETIME;
+            DrawCircleV(circularBuffer->buffer[i].position,
+                        circularBuffer->buffer[i].radius,
+                        Fade(circularBuffer->buffer[i].color, opacity));
+        }
+    }
+}
+
 
 static bool fft_settled(void)
 {
@@ -383,6 +516,32 @@ static bool color_from_rgb_hex(const char *text, Color *color)
 
 }
 
+static bool parse_nonnegative_float(const char *text, float *value)
+{
+    char *end = NULL;
+    float parsed = strtof(text, &end);
+
+    if (text == end || *end != '\0' || !isfinite(parsed) || parsed < 0.0f) {
+        return false;
+    }
+
+    *value = parsed;
+    return true;
+}
+
+static bool parse_particles_per_explosion(const char *text, int *value)
+{
+    char *end = NULL;
+    long parsed = strtol(text, &end, 10);
+
+    if (text == end || *end != '\0' || parsed < 0 || parsed >= MAX_PARTICLES) {
+        return false;
+    }
+
+    *value = (int)parsed;
+    return true;
+}
+
 static Color fft_bar_color(size_t index, size_t count)
 {
     if (p->custom_bars_color) return p->bars_color_value;
@@ -403,17 +562,38 @@ static void fft_render(Rectangle boundary, size_t m)
 {
     bool wide_bois = p->wide_bois;
     
-    // 
+    
     int number_of_bars = m - HIGH_FREQUENCY_BARS_IGNORED_IN_GRAPH;
 
-    // The width of a single bar
+    // The maximum width of a single bar
     float cell_width = (boundary.width/number_of_bars) + 1;
+
+    Vector2 emitterPosition = {
+        boundary.x + boundary.width/2.0f,
+        boundary.y + boundary.height/2.0f,
+    };
+
+    if (p->particles_enabled) {
+        UpdateParticles(&circularBuffer, boundary.width,  boundary.height);
+        UpdateCircularBuffer(&circularBuffer);
+    }
+
+    float total_loudness = 0;
+
+    for (int i = 0; i < number_of_bars; i++) {
+        total_loudness += p->out_log[i];
+    }
+
+    float average_loudness = total_loudness / number_of_bars;
+
+
 
     // Display the Bars
     for (int i = 0; i < number_of_bars; ++i) {
         float t = p->out_smooth[i];
+        
         Color color = fft_bar_color(i, number_of_bars);
-
+        
         // Handle the wide bois
         int x_position;
         if (wide_bois) {
@@ -451,87 +631,116 @@ static void fft_render(Rectangle boundary, size_t m)
     Texture2D texture = { rlGetTextureIdDefault(), 1, 1, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
 
     // No balls if castrated
-    if (p->castrated) {return;}
+    if (!p->castrated) {
+        // Display the Smears
+        SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.3f }, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 3.0f }, SHADER_UNIFORM_FLOAT);
+        BeginShaderMode(p->circle);
+        for (int i = 0; i < number_of_bars; ++i) {
+            float start = p->out_smear[i];
+            float end = p->out_smooth[i];
+            Color color = fft_bar_color(i, number_of_bars);
 
-
-    // Display the Smears
-    SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.3f }, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 3.0f }, SHADER_UNIFORM_FLOAT);
-    BeginShaderMode(p->circle);
-    for (int i = 0; i < number_of_bars; ++i) {
-        float start = p->out_smear[i];
-        float end = p->out_smooth[i];
-        Color color = fft_bar_color(i, number_of_bars);
-
-        // Handle the wide bois
-        int x_position;
-        if (wide_bois) {
-            x_position = i*cell_width;
-        }
-        else{
-            x_position = i*cell_width + cell_width/2;
-        }
-        Vector2 startPos = {
-            boundary.x + x_position,
-            boundary.y + boundary.height - boundary.height*2/3*start,
-        };
-        Vector2 endPos = {
-            boundary.x + x_position,
-            boundary.y + boundary.height - boundary.height*2/3*end,
-        };
-        float radius = cell_width*3*sqrtf(end);
-        Vector2 origin = {0};
-        if (endPos.y >= startPos.y) {
-            Rectangle dest = {
-                .x = startPos.x - radius/2,
-                .y = startPos.y,
-                .width = radius,
-                .height = endPos.y - startPos.y
+            // Handle the wide bois
+            int x_position;
+            if (wide_bois) {
+                x_position = i*cell_width;
+            }
+            else{
+                x_position = i*cell_width + cell_width/2;
+            }
+            Vector2 startPos = {
+                boundary.x + x_position,
+                boundary.y + boundary.height - boundary.height*2/3*start,
             };
-            Rectangle source = {0, 0, 1, 0.5};
-            DrawTexturePro(texture, source, dest, origin, 0, color);
-        } else {
-            Rectangle dest = {
-                .x = endPos.x - radius/2,
-                .y = endPos.y,
-                .width = radius,
-                .height = startPos.y - endPos.y
+            Vector2 endPos = {
+                boundary.x + x_position,
+                boundary.y + boundary.height - boundary.height*2/3*end,
             };
-            Rectangle source = {0, 0.5, 1, 0.5};
-            DrawTexturePro(texture, source, dest, origin, 0, color);
+            float radius = cell_width*3*sqrtf(end);
+            Vector2 origin = {0};
+            if (endPos.y >= startPos.y) {
+                Rectangle dest = {
+                    .x = startPos.x - radius/2,
+                    .y = startPos.y,
+                    .width = radius,
+                    .height = endPos.y - startPos.y
+                };
+                Rectangle source = {0, 0, 1, 0.5};
+                DrawTexturePro(texture, source, dest, origin, 0, color);
+            } else {
+                Rectangle dest = {
+                    .x = endPos.x - radius/2,
+                    .y = endPos.y,
+                    .width = radius,
+                    .height = startPos.y - endPos.y
+                };
+                Rectangle source = {0, 0.5, 1, 0.5};
+                DrawTexturePro(texture, source, dest, origin, 0, color);
+            }
         }
-    }
-    EndShaderMode();
+        EndShaderMode();
 
-    // Display the Circles
-    SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.07f }, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 5.0f }, SHADER_UNIFORM_FLOAT);
-    BeginShaderMode(p->circle);
-    for (int i = 0; i < number_of_bars; ++i) {
-        float t = p->out_smooth[i];
-        Color color = fft_bar_color(i, number_of_bars);
+        // Display the Circles
+        SetShaderValue(p->circle, p->circle_radius_location, (float[1]){ 0.07f }, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(p->circle, p->circle_power_location, (float[1]){ 5.0f }, SHADER_UNIFORM_FLOAT);
+        BeginShaderMode(p->circle);
+        for (int i = 0; i < number_of_bars; ++i) {
+            float t = p->out_smooth[i];
+            Color color = fft_bar_color(i, number_of_bars);
 
-        // Handle the wide bois
-        int x_position;
-        if (wide_bois) {
-            x_position = i*cell_width;
+            // Handle the wide bois
+            int x_position;
+            if (wide_bois) {
+                x_position = i*cell_width;
+            }
+            else{
+                x_position = i*cell_width + cell_width/2;
+            }
+            
+            Vector2 center = {
+                boundary.x + x_position,
+                boundary.y + boundary.height - boundary.height*2/3*t,
+            };
+            float radius = cell_width*6*sqrtf(t);
+            Vector2 position = {
+                .x = center.x - radius,
+                .y = center.y - radius,
+            };
+            DrawTextureEx(texture, position, 0, 2*radius, color);
         }
-        else{
-            x_position = i*cell_width + cell_width/2;
-        }
-        
-        Vector2 center = {
-            boundary.x + x_position,
-            boundary.y + boundary.height - boundary.height*2/3*t,
-        };
-        float radius = cell_width*6*sqrtf(t);
-        Vector2 position = {
-            .x = center.x - radius,
-            .y = center.y - radius,
-        };
-        DrawTextureEx(texture, position, 0, 2*radius, color);
+        EndShaderMode();
     }
-    EndShaderMode();
+
+
+
+
+    if (p->particles_enabled) {
+        float particle_loudness = 0.0f;
+        for (int i = 2; i < 20; i++){
+            if (p->out_smooth[i] > particle_loudness) {
+                particle_loudness = p->out_smooth[i];
+            }
+        }
+        float particle_intensity = particle_loudness - average_loudness;
+
+        if (particle_explosion_cooldown > 0.0f) {
+            particle_explosion_cooldown -= 1.0f/60.0f;
+        }
+
+        if (particle_explosion_cooldown <= 0.0f &&
+            particle_loudness >= p->particle_minimum_loudness &&
+            particle_previous_intensity > p->particle_peak_threshold &&
+            particle_previous_intensity - particle_intensity >= PARTICLE_PEAK_DROP) {
+            for (int i = 0; i < p->particles_per_explosion; ++i) {
+                EmitParticle(&circularBuffer, emitterPosition);
+            }
+            particle_explosion_cooldown = PARTICLE_EXPLOSION_COOLDOWN;
+        }
+        particle_previous_intensity = particle_intensity;
+
+        DrawParticles(&circularBuffer);
+    }
 }
 
 static void fft_push(float frame)
@@ -1217,7 +1426,7 @@ static bool toolbar(Track *track, Rectangle boundary)
 
     int x_offset_text_input = TEXT_INPUT_SIZE + HUD_BUTTON_MARGIN;
 
-    size_t buttons_count = 5;
+    size_t buttons_count = 10;
     if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 9)) return interacted;
 
     DrawRectangleRec(boundary, COLOR_TRACK_PANEL_BACKGROUND);
@@ -1272,6 +1481,23 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
 
+    state = checkbox(p, &p->particles_enabled, "Particles", (CLITERAL(Rectangle) {
+        x,
+        boundary.y,
+        HUD_BUTTON_SIZE,
+        HUD_BUTTON_SIZE,
+    }));
+    x += x_offset_button;
+    if (state & BS_CLICKED) {
+        interacted = true;
+        if (!p->particles_enabled) {
+            circularBuffer.head = 0;
+            circularBuffer.tail = 0;
+            particle_previous_intensity = 0.0f;
+            particle_explosion_cooldown = 0.0f;
+        }
+    }
+
     Rectangle bars_color_input_boundary = {
         x,
         boundary.y,
@@ -1299,24 +1525,92 @@ static bool toolbar(Track *track, Rectangle boundary)
     tooltip(p, background_color_input_boundary, "Background color (RGB or RRGGBB)", SIDE_TOP, false);
     x += x_offset_text_input;
 
+    Rectangle particle_peak_threshold_input_boundary = {
+        x,
+        boundary.y,
+        TEXT_INPUT_SIZE,
+        HUD_BUTTON_SIZE,
+    };
+    if (text_input(p, p->particle_peak_threshold_text, sizeof(p->particle_peak_threshold_text), particle_peak_threshold_input_boundary)) {
+        float value;
+        if (parse_nonnegative_float(p->particle_peak_threshold_text, &value)) {
+            p->particle_peak_threshold = value;
+        }
+        interacted = true;
+    }
+    tooltip(p, particle_peak_threshold_input_boundary, "Particle distance above average", SIDE_TOP, false);
+    x += x_offset_text_input;
+
+    Rectangle particle_minimum_loudness_input_boundary = {
+        x,
+        boundary.y,
+        TEXT_INPUT_SIZE,
+        HUD_BUTTON_SIZE,
+    };
+    if (text_input(p, p->particle_minimum_loudness_text, sizeof(p->particle_minimum_loudness_text), particle_minimum_loudness_input_boundary)) {
+        float value;
+        if (parse_nonnegative_float(p->particle_minimum_loudness_text, &value)) {
+            p->particle_minimum_loudness = value;
+        }
+        interacted = true;
+    }
+    tooltip(p, particle_minimum_loudness_input_boundary, "Particle minimum loudness", SIDE_TOP, false);
+    x += x_offset_text_input;
+
+    Rectangle particle_emitter_radius_input_boundary = {
+        x,
+        boundary.y,
+        TEXT_INPUT_SIZE,
+        HUD_BUTTON_SIZE,
+    };
+    if (text_input(p, p->particle_emitter_radius_text, sizeof(p->particle_emitter_radius_text), particle_emitter_radius_input_boundary)) {
+        float value;
+        if (parse_nonnegative_float(p->particle_emitter_radius_text, &value)) {
+            p->particle_emitter_radius = value;
+        }
+        interacted = true;
+    }
+    tooltip(p, particle_emitter_radius_input_boundary, "Particle emitter radius", SIDE_TOP, false);
+    x += x_offset_text_input;
+
+    Rectangle particles_per_explosion_input_boundary = {
+        x,
+        boundary.y,
+        TEXT_INPUT_SIZE,
+        HUD_BUTTON_SIZE,
+    };
+    if (text_input(p, p->particles_per_explosion_text, sizeof(p->particles_per_explosion_text), particles_per_explosion_input_boundary)) {
+        int value;
+        if (parse_particles_per_explosion(p->particles_per_explosion_text, &value)) {
+            p->particles_per_explosion = value;
+        }
+        interacted = true;
+    }
+    tooltip(p, particles_per_explosion_input_boundary, "Particles per explosion (0-9999)", SIDE_TOP, false);
+    x += x_offset_text_input;
+
     if (
         IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
         !CheckCollisionPointRec(GetMousePosition(), bars_color_input_boundary) &&
-        !CheckCollisionPointRec(GetMousePosition(), background_color_input_boundary)
+        !CheckCollisionPointRec(GetMousePosition(), background_color_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), particle_peak_threshold_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), particle_minimum_loudness_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), particle_emitter_radius_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), particles_per_explosion_input_boundary)
     ) {
         p->active_text_input_id = 0;
     }
 
     // TODO: implement "add new track" button that uses tinyfiledialogs
 
-    bool volume_slider_interacted = volume_slider(p, (CLITERAL(Rectangle) {
+    bool mute_button_interacted = mute_button(p, (CLITERAL(Rectangle) {
         x,
         boundary.y,
         HUD_BUTTON_SIZE,
         HUD_BUTTON_SIZE,
     }));
     x += HUD_BUTTON_SIZE;
-    interacted = interacted || volume_slider_interacted;
+    interacted = interacted || mute_button_interacted;
 
     state = fullscreen_button((CLITERAL(Rectangle) {
         boundary.x + boundary.width - HUD_BUTTON_SIZE,
@@ -1418,14 +1712,7 @@ static void preview_screen(void)
 
             fft_render(preview_boundary, m);
 
-#if 0
-            // TODO: toggle track playing on right mouse click on the preview
-            if (button(p, preview_boundary) & BS_CLICKED) {
-                toggle_track_playing(track);
-            }
-#else
             (void) button_with_location;
-#endif
 
             popup_tray(&p->pt, preview_boundary);
         } else {
@@ -1438,14 +1725,9 @@ static void preview_screen(void)
                 .height = h - timeline_height - toolbar_height,
             };
 
-#if 0
-            // TODO: toggle track playing on right mouse click on the preview
-            if (button(p, preview_boundary) & BS_CLICKED) {
-                toggle_track_playing(track);
-            }
-#else
+
             (void) button_with_location;
-#endif
+
 
             BeginScissorMode(preview_boundary.x, preview_boundary.y, preview_boundary.width, preview_boundary.height);
             fft_render(preview_boundary, m);
@@ -1700,8 +1982,17 @@ void plug_init(void)
     load_assets();
     p->screen = LoadRenderTexture(RENDER_WIDTH, RENDER_HEIGHT);
     p->current_track = -1;
-    p->castrated = false;
+    p->castrated = true;
     p->wide_bois = true;
+    p->particles_enabled = true;
+    p->particle_peak_threshold = 0.1f;
+    snprintf(p->particle_peak_threshold_text, sizeof(p->particle_peak_threshold_text), "%.2f", p->particle_peak_threshold);
+    p->particle_minimum_loudness = 0.3f;
+    snprintf(p->particle_minimum_loudness_text, sizeof(p->particle_minimum_loudness_text), "%.2f", p->particle_minimum_loudness);
+    p->particle_emitter_radius = PARTICLE_EMITTER_RADIUS;
+    snprintf(p->particle_emitter_radius_text, sizeof(p->particle_emitter_radius_text), "%.2f", p->particle_emitter_radius);
+    p->particles_per_explosion = PARTICLES_PER_EXPLOSION;
+    snprintf(p->particles_per_explosion_text, sizeof(p->particles_per_explosion_text), "%d", p->particles_per_explosion);
     p->custom_bars_color = false;
     p->custom_background_color = false;
 
@@ -1712,6 +2003,8 @@ void plug_init(void)
 
 void plug_update(void)
 {
+
+    
     BeginDrawing();
     ClearBackground(fft_background_color());
 

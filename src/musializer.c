@@ -36,7 +36,7 @@ int main(void)
     }
     SetExitKey(KEY_NULL);
     InitAudioDevice();
-
+    
     plug_init();
     while (!WindowShouldClose()) {
         plug_update();
