@@ -10,7 +10,7 @@
 
 - [[DONE]](DONE) Configurable graph bar width (multiplier).
 
-- Option to have bars change color depending on amplitude (like a "heat-map mode").
+- [[DONE]](DONE) Option to have bars change color depending on amplitude (like a "heat-map mode").
 
 - [[DONE]](DONE) New icon for diferentiation 
 

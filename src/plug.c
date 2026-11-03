@@ -193,6 +193,11 @@ typedef struct {
     bool castrated;
     bool wide_bois;
     bool particles_enabled;
+    bool heat_map_enabled;
+    char heat_map_cold_color[7];
+    Color heat_map_cold_color_value;
+    char heat_map_hot_color[7];
+    Color heat_map_hot_color_value;
     char particle_peak_threshold_text[16];
     float particle_peak_threshold;
     char particle_minimum_loudness_text[16];
@@ -505,10 +510,13 @@ static bool color_from_rgb_hex(const char *text, Color *color)
             } else {
                 return false;
             }
-            value = (value << 8) | (digit << 4) | digit;
+            value = (value << 4) | digit;
         }
 
-        *color = GetColor((value << 8) | 0xFF);
+        unsigned int red = ((value >> 8) & 0xF)*17;
+        unsigned int green = ((value >> 4) & 0xF)*17;
+        unsigned int blue = (value & 0xF)*17;
+        *color = GetColor(((red << 16) | (green << 8) | blue) << 8 | 0xFF);
         return true;
     } else {
         return false;
@@ -542,8 +550,12 @@ static bool parse_particles_per_explosion(const char *text, int *value)
     return true;
 }
 
-static Color fft_bar_color(size_t index, size_t count)
+static Color fft_bar_color(size_t index, size_t count, float amplitude)
 {
+    if (p->heat_map_enabled) {
+        float heat = fminf(1.0f, fmaxf(0.0f, amplitude));
+        return ColorLerp(p->heat_map_cold_color_value, p->heat_map_hot_color_value, heat);
+    }
     if (p->custom_bars_color) return p->bars_color_value;
     return ColorFromHSV((float)index/count*360, 0.75f, 1.0f);
 }
@@ -592,7 +604,7 @@ static void fft_render(Rectangle boundary, size_t m)
     for (int i = 0; i < number_of_bars; ++i) {
         float t = p->out_smooth[i];
         
-        Color color = fft_bar_color(i, number_of_bars);
+        Color color = fft_bar_color(i, number_of_bars, t);
         
         // Handle the wide bois
         int x_position;
@@ -639,7 +651,7 @@ static void fft_render(Rectangle boundary, size_t m)
         for (int i = 0; i < number_of_bars; ++i) {
             float start = p->out_smear[i];
             float end = p->out_smooth[i];
-            Color color = fft_bar_color(i, number_of_bars);
+            Color color = fft_bar_color(i, number_of_bars, end);
 
             // Handle the wide bois
             int x_position;
@@ -687,7 +699,7 @@ static void fft_render(Rectangle boundary, size_t m)
         BeginShaderMode(p->circle);
         for (int i = 0; i < number_of_bars; ++i) {
             float t = p->out_smooth[i];
-            Color color = fft_bar_color(i, number_of_bars);
+            Color color = fft_bar_color(i, number_of_bars, t);
 
             // Handle the wide bois
             int x_position;
@@ -1416,78 +1428,74 @@ static void finish_rendering_track(Track *track)
 
 
 
-// TODO: adapt toolbar to narrow widths
+static float toolbar_height_for_width(float width)
+{
+    float control_widths[] = {
+        HUD_BUTTON_SIZE, HUD_BUTTON_SIZE, HUD_BUTTON_SIZE,
+        HUD_BUTTON_SIZE, HUD_BUTTON_SIZE, HUD_BUTTON_SIZE,
+        TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, TEXT_INPUT_SIZE,
+        TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, TEXT_INPUT_SIZE,
+        TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, HUD_BUTTON_SIZE,
+    };
+    size_t rows = 1;
+    float row_width = 0.0f;
+
+    for (size_t i = 0; i < sizeof(control_widths)/sizeof(control_widths[0]); ++i) {
+        if (row_width > 0.0f && row_width + control_widths[i] > width) {
+            rows += 1;
+            row_width = 0.0f;
+        }
+        row_width += control_widths[i] + HUD_BUTTON_MARGIN;
+    }
+
+    return rows*(HUD_BUTTON_SIZE + HUD_BUTTON_MARGIN) - HUD_BUTTON_MARGIN;
+}
+
+static Rectangle toolbar_next_control(Rectangle boundary, float *x, float *y, float width)
+{
+    if (*x > boundary.x && *x + width > boundary.x + boundary.width) {
+        *x = boundary.x;
+        *y += HUD_BUTTON_SIZE + HUD_BUTTON_MARGIN;
+    }
+
+    Rectangle control = { *x, *y, width, HUD_BUTTON_SIZE };
+    *x += width + HUD_BUTTON_MARGIN;
+    return control;
+}
+
 static bool toolbar(Track *track, Rectangle boundary)
 {
     bool interacted = false;
     int state = 0;
 
-    int x_offset_button = HUD_BUTTON_SIZE + HUD_BUTTON_MARGIN;
-
-    int x_offset_text_input = TEXT_INPUT_SIZE + HUD_BUTTON_MARGIN;
-
-    size_t buttons_count = 10;
-    if (boundary.width < HUD_BUTTON_SIZE*(buttons_count + 9)) return interacted;
-
     DrawRectangleRec(boundary, COLOR_TRACK_PANEL_BACKGROUND);
 
     float x = boundary.x;
+    float y = boundary.y;
 
-    state = play_button(track, (CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-    x += x_offset_button;
+    state = play_button(track, toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
         interacted = true;
         toggle_track_playing(track);
     }
 
-    state = render_button((CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-    x += x_offset_button;
+    state = render_button(toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
         interacted = true;
         start_rendering_track(track);
     }
 
-    state = checkbox(p, &p->castrated, "Castrated mode (no balls)", (CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-    x += x_offset_button;
+    state = checkbox(p, &p->castrated, "Castrated mode (no balls)", toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
         interacted = true;
     }
 
-    state = checkbox(p, &p->wide_bois, "Wide Bois", (CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-
-    x += x_offset_button;
-
+    state = checkbox(p, &p->wide_bois, "Wide Bois", toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
         interacted = true;
     }
 
-    state = checkbox(p, &p->particles_enabled, "Particles", (CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-    x += x_offset_button;
+    state = checkbox(p, &p->particles_enabled, "Particles", toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
         interacted = true;
         if (!p->particles_enabled) {
@@ -1498,39 +1506,41 @@ static bool toolbar(Track *track, Rectangle boundary)
         }
     }
 
-    Rectangle bars_color_input_boundary = {
-        x,
-        boundary.y,
-        TEXT_INPUT_SIZE,
-        HUD_BUTTON_SIZE,
-    };
+    state = checkbox(p, &p->heat_map_enabled, "Heat map", toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
+    if (state & BS_CLICKED) {
+        interacted = true;
+    }
+
+    Rectangle bars_color_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
     
     if (text_input(p, p->bars_color, sizeof(p->bars_color), bars_color_input_boundary)) {
         p->custom_bars_color = color_from_rgb_hex(p->bars_color, &p->bars_color_value);
         interacted = true;
     }
     tooltip(p, bars_color_input_boundary, "Bar color (RGB or RRGGBB)", SIDE_TOP, false);
-    x += x_offset_text_input;
 
-    Rectangle background_color_input_boundary = {
-        x,
-        boundary.y,
-        TEXT_INPUT_SIZE,
-        HUD_BUTTON_SIZE,
-    };
+    Rectangle background_color_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
     if (text_input(p, p->background_color, sizeof(p->background_color), background_color_input_boundary)) {
         p->custom_background_color = color_from_rgb_hex(p->background_color, &p->background_color_value);
         interacted = true;
     }
     tooltip(p, background_color_input_boundary, "Background color (RGB or RRGGBB)", SIDE_TOP, false);
-    x += x_offset_text_input;
 
-    Rectangle particle_peak_threshold_input_boundary = {
-        x,
-        boundary.y,
-        TEXT_INPUT_SIZE,
-        HUD_BUTTON_SIZE,
-    };
+    Rectangle heat_map_cold_color_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
+    if (text_input(p, p->heat_map_cold_color, sizeof(p->heat_map_cold_color), heat_map_cold_color_input_boundary)) {
+        color_from_rgb_hex(p->heat_map_cold_color, &p->heat_map_cold_color_value);
+        interacted = true;
+    }
+    tooltip(p, heat_map_cold_color_input_boundary, "Heat map cold color (RGB or RRGGBB)", SIDE_TOP, false);
+
+    Rectangle heat_map_hot_color_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
+    if (text_input(p, p->heat_map_hot_color, sizeof(p->heat_map_hot_color), heat_map_hot_color_input_boundary)) {
+        color_from_rgb_hex(p->heat_map_hot_color, &p->heat_map_hot_color_value);
+        interacted = true;
+    }
+    tooltip(p, heat_map_hot_color_input_boundary, "Heat map hot color (RGB or RRGGBB)", SIDE_TOP, false);
+
+    Rectangle particle_peak_threshold_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
     if (text_input(p, p->particle_peak_threshold_text, sizeof(p->particle_peak_threshold_text), particle_peak_threshold_input_boundary)) {
         float value;
         if (parse_nonnegative_float(p->particle_peak_threshold_text, &value)) {
@@ -1539,14 +1549,8 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
     tooltip(p, particle_peak_threshold_input_boundary, "Particle distance above average", SIDE_TOP, false);
-    x += x_offset_text_input;
 
-    Rectangle particle_minimum_loudness_input_boundary = {
-        x,
-        boundary.y,
-        TEXT_INPUT_SIZE,
-        HUD_BUTTON_SIZE,
-    };
+    Rectangle particle_minimum_loudness_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
     if (text_input(p, p->particle_minimum_loudness_text, sizeof(p->particle_minimum_loudness_text), particle_minimum_loudness_input_boundary)) {
         float value;
         if (parse_nonnegative_float(p->particle_minimum_loudness_text, &value)) {
@@ -1555,14 +1559,8 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
     tooltip(p, particle_minimum_loudness_input_boundary, "Particle minimum loudness", SIDE_TOP, false);
-    x += x_offset_text_input;
 
-    Rectangle particle_emitter_radius_input_boundary = {
-        x,
-        boundary.y,
-        TEXT_INPUT_SIZE,
-        HUD_BUTTON_SIZE,
-    };
+    Rectangle particle_emitter_radius_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
     if (text_input(p, p->particle_emitter_radius_text, sizeof(p->particle_emitter_radius_text), particle_emitter_radius_input_boundary)) {
         float value;
         if (parse_nonnegative_float(p->particle_emitter_radius_text, &value)) {
@@ -1571,14 +1569,8 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
     tooltip(p, particle_emitter_radius_input_boundary, "Particle emitter radius", SIDE_TOP, false);
-    x += x_offset_text_input;
 
-    Rectangle particles_per_explosion_input_boundary = {
-        x,
-        boundary.y,
-        TEXT_INPUT_SIZE,
-        HUD_BUTTON_SIZE,
-    };
+    Rectangle particles_per_explosion_input_boundary = toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE);
     if (text_input(p, p->particles_per_explosion_text, sizeof(p->particles_per_explosion_text), particles_per_explosion_input_boundary)) {
         int value;
         if (parse_particles_per_explosion(p->particles_per_explosion_text, &value)) {
@@ -1587,12 +1579,13 @@ static bool toolbar(Track *track, Rectangle boundary)
         interacted = true;
     }
     tooltip(p, particles_per_explosion_input_boundary, "Particles per explosion (0-9999)", SIDE_TOP, false);
-    x += x_offset_text_input;
 
     if (
         IsMouseButtonPressed(MOUSE_LEFT_BUTTON) &&
         !CheckCollisionPointRec(GetMousePosition(), bars_color_input_boundary) &&
         !CheckCollisionPointRec(GetMousePosition(), background_color_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), heat_map_cold_color_input_boundary) &&
+        !CheckCollisionPointRec(GetMousePosition(), heat_map_hot_color_input_boundary) &&
         !CheckCollisionPointRec(GetMousePosition(), particle_peak_threshold_input_boundary) &&
         !CheckCollisionPointRec(GetMousePosition(), particle_minimum_loudness_input_boundary) &&
         !CheckCollisionPointRec(GetMousePosition(), particle_emitter_radius_input_boundary) &&
@@ -1603,13 +1596,7 @@ static bool toolbar(Track *track, Rectangle boundary)
 
     // TODO: implement "add new track" button that uses tinyfiledialogs
 
-    bool mute_button_interacted = mute_button(p, (CLITERAL(Rectangle) {
-        x,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
-    x += HUD_BUTTON_SIZE;
+    bool mute_button_interacted = mute_button(p, toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     interacted = interacted || mute_button_interacted;
 
     state = fullscreen_button((CLITERAL(Rectangle) {
@@ -1680,7 +1667,8 @@ static void preview_screen(void)
 
         size_t m = fft_analyze(GetFrameTime());
 
-        float toolbar_height = HUD_BUTTON_SIZE;
+        float toolbar_width = p->fullscreen ? (float)w : (float)w - 320.0f;
+        float toolbar_height = toolbar_height_for_width(toolbar_width);
         if (p->fullscreen) {
             // TODO: make timeline somehow visible in fullscreen mode (maybe miniversion of it on the toolbar)
             static float hud_timer = HUD_TIMER_SECS;
@@ -1985,6 +1973,11 @@ void plug_init(void)
     p->castrated = true;
     p->wide_bois = true;
     p->particles_enabled = true;
+    p->heat_map_enabled = false;
+    snprintf(p->heat_map_cold_color, sizeof(p->heat_map_cold_color), "0000FF");
+    p->heat_map_cold_color_value = GetColor(0x0000FFFF);
+    snprintf(p->heat_map_hot_color, sizeof(p->heat_map_hot_color), "FF0000");
+    p->heat_map_hot_color_value = GetColor(0xFF0000FF);
     p->particle_peak_threshold = 0.1f;
     snprintf(p->particle_peak_threshold_text, sizeof(p->particle_peak_threshold_text), "%.2f", p->particle_peak_threshold);
     p->particle_minimum_loudness = 0.3f;
