@@ -780,7 +780,6 @@ static Track *current_track(void)
     return NULL;
 }
 
-
 static void popup_tray_push(Popup_Tray *pt)
 {
     if (pt->count < POPUP_TRAY_CAPACITY) {
@@ -795,6 +794,54 @@ static void popup_tray_push(Popup_Tray *pt)
         PT_FIRST(pt)->lifetime = HUD_POPUP_LIFETIME_SECS + pt->slide;
     }
 }
+
+static bool open_track(const char *path)
+{
+    Music music = LoadMusicStream(path);
+    if (!IsMusicValid(music)) return false;
+
+    char *file_path = strdup(path);
+    assert(file_path != NULL);
+    AttachAudioStreamProcessor(music.stream, callback);
+
+    for (size_t i = 0; i < p->tracks.count; ++i) {
+        StopMusicStream(p->tracks.items[i].music);
+        UnloadMusicStream(p->tracks.items[i].music);
+        free(p->tracks.items[i].file_path);
+    }
+
+    p->tracks.count = 0;
+    p->current_track = -1;
+    nob_da_append(&p->tracks, (CLITERAL(Track) {
+        .file_path = file_path,
+        .music = music,
+    }));
+    p->current_track = 0;
+
+    fft_clean();
+    circularBuffer.head = 0;
+    circularBuffer.tail = 0;
+    particle_previous_intensity = 0.0f;
+    particle_explosion_cooldown = 0.0f;
+    PlayMusicStream(music);
+    return true;
+}
+
+static bool open_track_dialog(void)
+{
+    int allow_multiple_selects = 0;
+    const char *filter_params[] = {"*.wav", "*.ogg", "*.mp3", "*.qoa", "*.xm", "*.mod", "*.flac"};
+    char *input_path = tinyfd_openFileDialog(
+        "Path to music file", "./", NOB_ARRAY_LEN(filter_params), filter_params, "music file", allow_multiple_selects);
+    if (input_path == NULL) return false;
+
+    if (!open_track(input_path)) {
+        popup_tray_push(&p->pt);
+        return false;
+    }
+    return true;
+}
+
 
 static inline float signf(float x)
 {
@@ -1028,165 +1075,7 @@ void track_label(Font font, const char *text, Vector2 position, float fontSize, 
     }
 }
 
-#define tracks_panel(panel_boundary) \
-    tracks_panel_with_location(__FILE__, __LINE__, panel_boundary)
-static void tracks_panel_with_location(const char *file, int line, Rectangle panel_boundary)
-{
-    DrawRectangleRec(panel_boundary, COLOR_TRACK_PANEL_BACKGROUND);
 
-    Vector2 mouse = GetMousePosition();
-
-    float scroll_bar_width = panel_boundary.width*0.03;
-    float item_size = panel_boundary.width*0.2;
-    float visible_area_size = panel_boundary.height;
-    float entire_scrollable_area = item_size*p->tracks.count;
-
-    static float panel_scroll = 0;
-    static float panel_velocity = 0;
-    panel_velocity *= 0.9;
-    if (CheckCollisionPointRec(mouse, panel_boundary)) {
-        panel_velocity += GetMouseWheelMove()*item_size*8;
-    }
-    panel_scroll -= panel_velocity*GetFrameTime();
-
-    static bool scrolling = false;
-    static float scrolling_mouse_offset = 0.0f;
-    if (scrolling) {
-        panel_scroll = (mouse.y - panel_boundary.y - scrolling_mouse_offset)/visible_area_size*entire_scrollable_area;
-    }
-
-    float min_scroll = 0;
-    if (panel_scroll < min_scroll) panel_scroll = min_scroll;
-    float max_scroll = entire_scrollable_area - visible_area_size;
-    if (max_scroll < 0) max_scroll = 0;
-    if (panel_scroll > max_scroll) panel_scroll = max_scroll;
-    float panel_padding = item_size*0.1;
-
-    uint64_t id = DJB2_INIT;
-    id = djb2(id, file, strlen(file));
-    id = djb2(id, &line, sizeof(line));
-
-    for (size_t i = 0; i < p->tracks.count; ++i) {
-        Rectangle item_boundary = {
-            .x = panel_boundary.x + panel_padding,
-            .y = i*item_size + panel_boundary.y + panel_padding - panel_scroll,
-            .width = panel_boundary.width - panel_padding*2 - scroll_bar_width,
-            .height = item_size - panel_padding*2,
-        };
-        Color color;
-        if (((int) i != p->current_track)) {
-            uint64_t item_id = djb2(id, &i, sizeof(i));
-
-            int state = button_with_id(p, item_id, GetCollisionRec(panel_boundary, item_boundary));
-            if (state & BS_HOVEROVER) {
-                color = COLOR_TRACK_BUTTON_HOVEROVER;
-            } else {
-                color = COLOR_TRACK_BUTTON_BACKGROUND;
-            }
-            if (state & BS_CLICKED) {
-                Track *track = current_track();
-                if (track) StopMusicStream(track->music);
-                PlayMusicStream(p->tracks.items[i].music);
-                p->current_track = i;
-            }
-        } else {
-            color = COLOR_TRACK_BUTTON_SELECTED;
-        }
-        // TODO: enable MSAA so the rounded rectangles look better
-        // That triggers an old raylib bug with circles tho, so we will have to look into that
-        DrawRectangleRounded(item_boundary, 0.2, 20, color);
-
-        const char *text = GetFileName(p->tracks.items[i].file_path);
-        float fontSize = item_boundary.height*0.5;
-        float text_padding = item_boundary.width*0.05;
-        Vector2 size = MeasureTextEx(p->font, text, fontSize, 0);
-        Vector2 position = {
-            .x = item_boundary.x + text_padding,
-            .y = item_boundary.y + item_boundary.height*0.5 - size.y*0.5,
-        };
-        // TODO: use SDF fonts
-        // Label overflow scroll handler
-        float max_width = item_boundary.width - text_padding*2;
-        uint64_t item_id = djb2(id, &i, sizeof(i));
-        int state = button_with_id(p, item_id, GetCollisionRec(panel_boundary, item_boundary));
-
-        if ((size.x > max_width)) { // <-- Item needs ScissorMode
-            BeginScissorMode(position.x, position.y, max_width, item_boundary.height);
-
-            if (state & BS_HOVEROVER) { // <-- Current item is being hovered on and needs scrolling
-                static float dt = 0;
-                static uint64_t hovered_label_id = 0;
-                static int px_shift = 0;
-                static bool scroll_left = true;
-
-                dt += GetFrameTime();
-                if (item_id != hovered_label_id) { // <-- But it is not same as the last hovered item, so reset the shift
-                    px_shift = 0;
-                    scroll_left = true;
-                    hovered_label_id = item_id;
-                } else { // <-- it is same as the last hovered item, so count the shift
-                    if (dt > TRACKLABEL_SCROLL_SECS) {
-                        dt = 0.0f;
-                        if ((abs(px_shift) >= size.x - max_width + 10) || (px_shift == 10)) { // <-- End of scroll (with 10 padding)
-                            scroll_left = !scroll_left; // <-- flip direction
-                        }
-                        scroll_left ? --px_shift : ++px_shift;
-                    }
-                }
-                position.x += px_shift; // <-- Apply the shift
-            }
-            track_label(p->font, text, position, fontSize, WHITE);
-            EndScissorMode();
-
-        } else { // <-- No need for ScissorMode
-            track_label(p->font, text, position, fontSize, WHITE);
-        }
-    }
-
-    // TODO: up and down clickable buttons on the scrollbar
-
-    if (entire_scrollable_area > visible_area_size) { // Is scrolling needed
-        float t = visible_area_size/entire_scrollable_area;
-        float q = panel_scroll/entire_scrollable_area;
-        Rectangle scroll_bar_area = {
-            .x = panel_boundary.x + panel_boundary.width - scroll_bar_width,
-            .y = panel_boundary.y,
-            .width = scroll_bar_width,
-            .height = panel_boundary.height,
-        };
-        // TODO: some sort of color for the scroll bar background
-        //DrawRectangleRounded(scroll_bar_area, 0.8, 20, RED);
-        Rectangle scroll_bar_boundary = {
-            .x = panel_boundary.x + panel_boundary.width - scroll_bar_width,
-            .y = panel_boundary.y + panel_boundary.height*q,
-            .width = scroll_bar_width,
-            .height = panel_boundary.height*t,
-        };
-        DrawRectangleRounded(scroll_bar_boundary, 0.8, 20, COLOR_TRACK_BUTTON_BACKGROUND);
-
-        if (scrolling) {
-            if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-                scrolling = false;
-            }
-        } else {
-            if (CheckCollisionPointRec(mouse, scroll_bar_boundary)) {
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                    scrolling = true;
-                    scrolling_mouse_offset = mouse.y - scroll_bar_boundary.y;
-                }
-            } else if (CheckCollisionPointRec(mouse, scroll_bar_area)) {
-                if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-                    if (mouse.y < scroll_bar_boundary.y) {
-                        panel_velocity += item_size*16;
-                    } else if (scroll_bar_boundary.y + scroll_bar_boundary.height < mouse.y){
-                        panel_velocity += -item_size*16;
-                    }
-                }
-            }
-        }
-    }
-
-}
 
 #define fullscreen_button(preview_boundary) \
     fullscreen_button_with_loc(__FILE__, __LINE__, preview_boundary)
@@ -1426,16 +1315,33 @@ static void finish_rendering_track(Track *track)
     PlayMusicStream(track->music);
 }
 
+static int open_track_button(Rectangle boundary)
+{
+    const char *id_text = "open-track";
+    uint64_t id = djb2(DJB2_INIT, id_text, strlen(id_text));
+    int state = button_with_id(p, id, boundary);
+    Color color = (state & BS_HOVEROVER) ? COLOR_TRACK_BUTTON_HOVEROVER : COLOR_TRACK_BUTTON_BACKGROUND;
+    DrawRectangleRounded(boundary, 0.2f, 20, color);
+    const char *label = "Open";
+    Vector2 text_size = MeasureTextEx(p->font, label, 18.0f, 0.0f);
+    DrawTextEx(p->font, label, (Vector2){
+        boundary.x + (boundary.width - text_size.x)/2.0f,
+        boundary.y + (boundary.height - text_size.y)/2.0f,
+    }, 18.0f, 0.0f, WHITE);
+    tooltip(p, boundary, "Open music file", SIDE_TOP, false);
+    return state;
+}
 
 
 static float toolbar_height_for_width(float width)
 {
     float control_widths[] = {
+        TEXT_INPUT_SIZE, HUD_BUTTON_SIZE,
         HUD_BUTTON_SIZE, HUD_BUTTON_SIZE, HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE, HUD_BUTTON_SIZE, HUD_BUTTON_SIZE,
+        HUD_BUTTON_SIZE, HUD_BUTTON_SIZE,
         TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, TEXT_INPUT_SIZE,
         TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, TEXT_INPUT_SIZE,
-        TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, HUD_BUTTON_SIZE,
+        TEXT_INPUT_SIZE, TEXT_INPUT_SIZE, HUD_BUTTON_SIZE, HUD_BUTTON_SIZE,
     };
     size_t rows = 1;
     float row_width = 0.0f;
@@ -1472,6 +1378,13 @@ static bool toolbar(Track *track, Rectangle boundary)
 
     float x = boundary.x;
     float y = boundary.y;
+
+    state = open_track_button(toolbar_next_control(boundary, &x, &y, TEXT_INPUT_SIZE));
+    if (state & BS_CLICKED) {
+        open_track_dialog();
+        track = current_track();
+        interacted = true;
+    }
 
     state = play_button(track, toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
@@ -1594,17 +1507,10 @@ static bool toolbar(Track *track, Rectangle boundary)
         p->active_text_input_id = 0;
     }
 
-    // TODO: implement "add new track" button that uses tinyfiledialogs
-
     bool mute_button_interacted = mute_button(p, toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     interacted = interacted || mute_button_interacted;
 
-    state = fullscreen_button((CLITERAL(Rectangle) {
-        boundary.x + boundary.width - HUD_BUTTON_SIZE,
-        boundary.y,
-        HUD_BUTTON_SIZE,
-        HUD_BUTTON_SIZE,
-    }));
+    state = fullscreen_button(toolbar_next_control(boundary, &x, &y, HUD_BUTTON_SIZE));
     if (state & BS_CLICKED) {
         interacted = true;
         p->fullscreen = !p->fullscreen;
@@ -1623,28 +1529,12 @@ static void preview_screen(void)
 
     if (IsFileDropped()) {
         FilePathList droppedFiles = LoadDroppedFiles();
-        // TODO: loading files synchronously like that actually blocks the UI thread
-        // Maybe we should do that in a separate thread.
-        for (size_t i = 0; i < droppedFiles.count; ++i) {
-            Music music = LoadMusicStream(droppedFiles.paths[i]);
-            if (IsMusicValid(music)) {
-                AttachAudioStreamProcessor(music.stream, callback);
-                char *file_path = strdup(droppedFiles.paths[i]);
-                assert(file_path != NULL);
-                nob_da_append(&p->tracks, (CLITERAL(Track) {
-                    .file_path = file_path,
-                    .music = music,
-                }));
-            } else {
+        if (droppedFiles.count > 0) {
+            if (!open_track(droppedFiles.paths[0])) {
                 popup_tray_push(&p->pt);
             }
         }
         UnloadDroppedFiles(droppedFiles);
-
-        if (current_track() == NULL && p->tracks.count > 0) {
-            p->current_track = 0;
-            PlayMusicStream(p->tracks.items[0].music);
-        }
     }
 
     Track *track = current_track();
@@ -1667,7 +1557,7 @@ static void preview_screen(void)
 
         size_t m = fft_analyze(GetFrameTime());
 
-        float toolbar_width = p->fullscreen ? (float)w : (float)w - 320.0f;
+        float toolbar_width = (float)w;
         float toolbar_height = toolbar_height_for_width(toolbar_width);
         if (p->fullscreen) {
             // TODO: make timeline somehow visible in fullscreen mode (maybe miniversion of it on the toolbar)
@@ -1704,12 +1594,11 @@ static void preview_screen(void)
 
             popup_tray(&p->pt, preview_boundary);
         } else {
-            float tracks_panel_width = 320.0f;
             float timeline_height = 150.0f;
             Rectangle preview_boundary = {
-                .x = tracks_panel_width,
+                .x = 0,
                 .y = 0,
-                .width = w - tracks_panel_width,
+                .width = w,
                 .height = h - timeline_height - toolbar_height,
             };
 
@@ -1722,12 +1611,13 @@ static void preview_screen(void)
             popup_tray(&p->pt, preview_boundary);
             EndScissorMode();
 
-            tracks_panel((CLITERAL(Rectangle) {
+            toolbar(track, CLITERAL(Rectangle) {
                 .x = 0,
-                .y = 0,
-                .width = tracks_panel_width,
-                .height = h - timeline_height,
-            }));
+                .y = preview_boundary.height,
+                .width = w,
+                .height = toolbar_height,
+            });
+            track = current_track();
 
             timeline(CLITERAL(Rectangle) {
                 .x = 0,
@@ -1735,13 +1625,6 @@ static void preview_screen(void)
                 .width = w,
                 .height = timeline_height,
             }, track);
-
-            toolbar(track, CLITERAL(Rectangle) {
-                .x = tracks_panel_width,
-                .y = preview_boundary.height,
-                .width = preview_boundary.width,
-                .height = toolbar_height,
-            });
         }
     } else { // We are waiting for the user to Drag&Drop the Music
         const char *label = "Click to Select File";
@@ -1770,28 +1653,7 @@ static void preview_screen(void)
         });
 
         if (button(p, ((Rectangle) {0, 0, w, h})) & BS_CLICKED) {
-            int allow_multiple_selects = 0; // TODO: enable multiple selects
-            char const *filter_params[] = {"*.wav", "*.ogg", "*.mp3", "*.qoa", "*.xm", "*.mod", "*.flac"};
-            char *input_path = tinyfd_openFileDialog("Path to music file", "./", NOB_ARRAY_LEN(filter_params), filter_params, "music file", allow_multiple_selects);
-            if (input_path) {
-                Music music = LoadMusicStream(input_path);
-                if (IsMusicValid(music)) {
-                    AttachAudioStreamProcessor(music.stream, callback);
-                    char *file_path = strdup(input_path);
-                    assert(file_path != NULL);
-                    nob_da_append(&p->tracks, (CLITERAL(Track) {
-                        .file_path = file_path,
-                        .music = music,
-                    }));
-                } else {
-                    popup_tray_push(&p->pt);
-                }
-
-                if (current_track() == NULL && p->tracks.count > 0) {
-                    p->current_track = 0;
-                    PlayMusicStream(p->tracks.items[0].music);
-                }
-            }
+            open_track_dialog();
         }
     }
 }

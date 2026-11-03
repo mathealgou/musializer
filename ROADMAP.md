@@ -32,7 +32,7 @@
 
 - Make the thing work with stereo audio (apparently, bro wrote a mono audio application)
 
-- Remove useless playlist functionality
+- [[DONE]](DONE) Remove useless playlist functionality
 
 - Add CLI (do '$musializer file.wav' and video comes out the other end)
 
